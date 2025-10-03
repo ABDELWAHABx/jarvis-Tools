@@ -7,7 +7,7 @@ import os
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 
 def _is_desktop_session() -> bool:
@@ -59,6 +59,8 @@ class SystemTrayController:
         self._status: str = ""
         self._host: Optional[str] = None
         self._port: Optional[int] = None
+        self._on_open: Optional[Callable[[], None]] = None
+        self._on_quit: Optional[Callable[[], None]] = None
 
     # Public API ---------------------------------------------------------
     def start(self, host: str, port: int) -> None:
@@ -74,10 +76,24 @@ class SystemTrayController:
             tray_icon.title = _format_title(host, port, self._status or "Initializing")
             tray_icon.icon = self._create_icon_image("starting")
             tray_icon.visible = True
+            tray_icon.menu = self._build_menu()
 
         self._icon = icon
         self._thread = threading.Thread(target=icon.run, kwargs={"setup": setup}, daemon=True)
         self._thread.start()
+
+    def register_callbacks(self, *, on_open: Optional[Callable[[], None]] = None, on_quit: Optional[Callable[[], None]] = None) -> None:
+        """Attach callbacks for the tray menu."""
+
+        self._on_open = on_open
+        self._on_quit = on_quit
+        if self._backend is None or self._icon is None:
+            return
+
+        try:
+            self._icon.menu = self._build_menu()
+        except Exception:
+            pass
 
     def update_status(self, status: str) -> None:
         """Update the tray tooltip/icon to reflect the latest status."""
@@ -109,6 +125,11 @@ class SystemTrayController:
             self._icon = None
             self._thread = None
 
+    def is_available(self) -> bool:
+        """Return True if a tray backend is available."""
+
+        return self._backend is not None
+
     # Internal helpers ---------------------------------------------------
     def _create_icon_image(self, state: str) -> "PIL.Image.Image":
         backend = self._backend
@@ -117,6 +138,37 @@ class SystemTrayController:
         draw = backend.image_draw_module.Draw(image)
         draw.ellipse((12, 12, 52, 52), fill=_state_indicator_color(state))
         return image
+
+    def _build_menu(self):  # pragma: no cover - pystray menu wiring
+        backend = self._backend
+        if backend is None:
+            return None
+
+        items = []
+        if self._on_open is not None:
+            items.append(backend.pystray.MenuItem("Open Control Center", self._handle_open, default=True))
+
+        if self._on_quit is not None:
+            items.append(backend.pystray.MenuItem("Quit Tools API", self._handle_quit))
+
+        if not items:
+            return None
+
+        return backend.pystray.Menu(*items)
+
+    def _handle_open(self, icon: "pystray.Icon", item: "pystray.MenuItem") -> None:
+        if self._on_open is not None:
+            try:
+                self._on_open()
+            except Exception:
+                pass
+
+    def _handle_quit(self, icon: "pystray.Icon", item: "pystray.MenuItem") -> None:
+        if self._on_quit is not None:
+            try:
+                self._on_quit()
+            except Exception:
+                pass
 
 
 def _state_color(state: str) -> str:

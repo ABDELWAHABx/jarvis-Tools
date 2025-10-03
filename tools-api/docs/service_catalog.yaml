@@ -1,10 +1,12 @@
 services:
   - name: "Rich Text Parser"
-    summary: "Convert HTML or Markdown into Google Docs batchUpdate operations for automated document assembly."
+    summary: "Turn HTML or Markdown into Google Docs-friendly instructions so agents can create polished docs automatically."
     docs_url: "http://localhost:8000/docs#/parser"
     endpoints:
       - method: "POST"
         path: "/parse/html"
+        headline: "HTML to Google Docs"
+        tagline: "Feed marketing-approved HTML and receive the Google Docs operations to recreate it."
         description: "Convert HTML markup into Google Docs batchUpdate requests."
         request:
           content_type: "application/json"
@@ -26,6 +28,8 @@ services:
                   text: "Hello World\n"
       - method: "POST"
         path: "/parse/markdown"
+        headline: "Markdown to Google Docs"
+        tagline: "Turn Markdown release notes into Google Docs-ready edits."
         description: "Convert Markdown into Google Docs batchUpdate requests via the HTML pipeline."
         request:
           content_type: "application/json"
@@ -41,6 +45,8 @@ services:
             requests: "list – Google Docs API batchUpdate operations."
       - method: "POST"
         path: "/parse/docs/html"
+        headline: "HTML quick convert"
+        tagline: "Convert HTML instantly without touching the async queue."
         description: "Synchronous HTML conversion helper for Google Docs batchUpdate payloads."
         request:
           content_type: "application/json"
@@ -55,6 +61,8 @@ services:
           - "Optimized for n8n HTTP Request nodes where async queues are unnecessary."
       - method: "POST"
         path: "/parse/docs/markdown"
+        headline: "Markdown quick convert"
+        tagline: "Use when you want Markdown converted to Google Docs edits in real time."
         description: "Synchronous Markdown conversion helper for Google Docs batchUpdate payloads."
         request:
           content_type: "application/json"
@@ -67,6 +75,8 @@ services:
             requests: "list – Google Docs API batchUpdate operations."
       - method: "POST"
         path: "/parse/queue/html"
+        headline: "Queue HTML conversion"
+        tagline: "Hand off large HTML conversions to the background worker and poll later."
         description: "Enqueue HTML conversion work to Redis/RQ for long-running jobs."
         request:
           content_type: "application/json"
@@ -80,6 +90,8 @@ services:
             job_id: "string – Identifier that can be polled via /parse/job/{id}."
       - method: "POST"
         path: "/parse/queue/markdown"
+        headline: "Queue Markdown conversion"
+        tagline: "Offload Markdown conversions to the queue when they might take a while."
         description: "Enqueue Markdown conversion work to Redis/RQ for long-running jobs."
         request:
           content_type: "application/json"
@@ -93,6 +105,8 @@ services:
             job_id: "string – Identifier that can be polled via /parse/job/{id}."
       - method: "GET"
         path: "/parse/job/{job_id}"
+        headline: "Check queued job"
+        tagline: "See whether a queued conversion is still running, finished, or failed."
         description: "Check the status of a queued conversion job."
         response:
           content_type: "application/json"
@@ -101,11 +115,13 @@ services:
             result: "object – Present when status=finished."
             error: "string – Present when status=failed."
   - name: "Google Docs JSON Parser"
-    summary: "Extract text, links, and image references from Google Docs JSON exports."
+    summary: "Pull plain text, links, and image references out of Google Docs JSON exports for downstream automations."
     docs_url: "http://localhost:8000/docs#/Google_Docs_Parser"
     endpoints:
       - method: "POST"
         path: "/parse/gdocs/json"
+        headline: "Docs to text"
+        tagline: "Paste a Google Docs JSON export and receive clean text, links, and image references."
         description: "Parse a Google Docs JSON payload produced by the Google Docs API."
         request:
           content_type: "application/json"
@@ -121,6 +137,8 @@ services:
             images: "list – Image URLs present in the document."
       - method: "POST"
         path: "/parse/gdocs/file"
+        headline: "Docs file to text"
+        tagline: "Upload a saved Google Docs JSON file and pull out the essentials."
         description: "Upload a Google Docs JSON export file and receive structured output."
         request:
           content_type: "multipart/form-data"
@@ -134,11 +152,13 @@ services:
             urls: "list"
             images: "list"
   - name: "Docx Toolkit"
-    summary: "Parse binary .docx uploads into structured responses and generate documents."
+    summary: "Quickly turn uploaded .docx files into plain text for agents or LLMs."
     docs_url: "http://localhost:8000/docs#/docx"
     endpoints:
       - method: "POST"
         path: "/docx/parse"
+        headline: "DOCX to plain text"
+        tagline: "Send a .docx file and get back clean text with file metadata."
         description: "Upload a binary .docx file and extract plain text."
         request:
           content_type: "application/octet-stream"
