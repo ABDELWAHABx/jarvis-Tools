@@ -28,6 +28,7 @@
 - **Queue-Ready Workflows** – Built-in Redis + RQ worker enables durable background processing for large document jobs.
 - **Modular Architecture** – Add new tool routers quickly; see [code_flow.md](./code_flow.md) for an overview.
 - **JavaScript Tool Bridge** – Wrap Node.js utilities (like the panorama splitter and Cobalt media downloader) in Python-friendly REST endpoints with binary-friendly delivery for n8n.
+- **Media Toolkit** – Use the bundled yt-dlp endpoint to inspect streams or fetch downloadable media with automation-ready headers.
 - **Observability Hooks** – Centralized logging and error handling give SRE and platform teams the visibility they expect.
 
 ```mermaid
@@ -106,6 +107,22 @@ export COBALT_API_TIMEOUT="90"
 ```
 
 Once configured you can `POST /js-tools/cobalt` with any options supported by Cobalt's schema (for example `audioFormat`, `videoQuality`, or service-specific flags). Default responses return the raw JSON from Cobalt. Include `{"response_format": "binary"}` to download the media bytes directly via Tools API.
+
+#### yt-dlp media helper
+Tools API now ships with a thin wrapper around [yt-dlp](https://github.com/yt-dlp/yt-dlp) for quick metadata lookups or direct downloads:
+
+```bash
+curl -X POST http://localhost:8000/media/yt-dlp \
+  -H "Content-Type: application/json" \
+  -d '{
+        "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "options": {"format": "bestvideo+bestaudio/best"}
+      }'
+```
+
+- Default responses return the full yt-dlp metadata, perfect for agent reasoning or UI previews.
+- Set `"response_format": "binary"` to receive the media stream directly. The response includes `Content-Disposition` and `X-YtDlp-Metadata` headers to keep n8n or Zapier automations informed about the download.
+- Pass optional headers (cookies, auth) or proxy settings via the `options` object to handle restricted content.
 
 ### Docker
 ```bash

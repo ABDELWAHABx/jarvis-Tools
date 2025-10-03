@@ -309,6 +309,38 @@
           }
         }
       ]
+    },
+    {
+      "name": "Media Toolkit",
+      "summary": "Download or inspect online media using the bundled yt-dlp integration.",
+      "docs_url": "http://localhost:8000/docs#/media-tools/yt_dlp_media_yt_dlp_post",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/media/yt-dlp",
+          "headline": "One-call yt-dlp",
+          "tagline": "Request metadata or stream downloads from any URL yt-dlp supports.",
+          "description": "Wraps yt-dlp with safe defaults for agent and automation workflows.",
+          "request": {
+            "content_type": "application/json",
+            "fields": {
+              "url": "string – URL to inspect or download.",
+              "response_format": "string – 'json' (default metadata) or 'binary' to stream the file.",
+              "filename": "string – Optional filename override when streaming the binary response.",
+              "options": "object – Optional yt-dlp options such as format, playlist_items, proxy, or custom headers."
+            }
+          },
+          "response": {
+            "content_type": "application/json | video/* | audio/*",
+            "fields": {
+              "metadata": "object – yt-dlp info dictionary mirroring the CLI output when response_format=json."
+            },
+            "notes": [
+              "Binary responses include automation-friendly headers: Content-Disposition and X-YtDlp-Metadata (base64 JSON)."
+            ]
+          }
+        }
+      ]
     }
   ]
 }
