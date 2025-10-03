@@ -10,7 +10,8 @@ import uvicorn
 
 from app.extensions import local_queue_extension
 from app.main import app
-from app.runtime.documentation import print_documentation
+from app.runtime.documentation import render_request_overview
+from app.runtime.tray import SystemTrayController
 from app.runtime.worker import BackgroundWorkerController
 from app.services.parser_service import parse_html_to_docs_sync
 
@@ -47,13 +48,8 @@ def _wait_for_http_ready(host: str, port: int, timeout: float = 10.0) -> bool:
 
 
 def _print_summary(host: str, port: int) -> None:
-    print("\n================ Services Summary ================")
-    print(f"HTTP server: http://{host}:{port} (FastAPI/uvicorn)")
-    print("Local queue: in-memory (endpoint: /local/queue/html)")
-    print(f"Worker: in-process background thread (writing to {local_queue_extension.jobs_dir.resolve()})")
-    print("Note: This setup is single-host, ephemeral and intended for easy testing.")
-    print("For production use a persistent queue (Redis/RQ) and durable storage (S3, DB).")
-    print("===================================================\n")
+    overview = render_request_overview(host, port)
+    print(overview)
 
 
 def _job_handler(job: dict) -> dict:
@@ -66,17 +62,23 @@ def main() -> None:
     """Entry point used by run_all.py."""
     host, port = _get_host_port()
 
+    tray = SystemTrayController()
+    tray.start(host, port)
+
     worker = BackgroundWorkerController(local_queue_extension, handler=_job_handler)
     worker.start()
     _start_uvicorn_thread(host, port)
 
     print("Starting HTTP server and worker...")
+    tray.update_status("Starting server...")
     if not _wait_for_http_ready(host, port):
         print("ERROR: HTTP server did not start within timeout")
+        tray.update_status("Failed to start")
+        tray.stop()
         return
 
     _print_summary(host, port)
-    print_documentation()
+    tray.update_status("Running")
     print("\nRun the process in the foreground to keep services running. Ctrl+C to stop.")
 
     try:
@@ -85,6 +87,8 @@ def main() -> None:
     except KeyboardInterrupt:
         print("Shutting down...")
         worker.stop()
+        tray.update_status("Stopped")
+        tray.stop()
 
 
 __all__ = ["main"]
