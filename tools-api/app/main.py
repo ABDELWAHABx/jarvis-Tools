@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from app.routers import parser, docx
+from app.routers import parser, docx, gdocs_parser
 from app.extensions import local_queue_extension
 from app.utils.logger import logger
 from app.config import settings
@@ -47,6 +47,7 @@ async def log_requests(request: Request, call_next):
 # Routers
 app.include_router(parser.router, prefix="/parse", tags=["parser"])
 app.include_router(docx.router)  # Already has /docx prefix
+app.include_router(gdocs_parser.router)
 local_queue_extension.register(app)
 
 

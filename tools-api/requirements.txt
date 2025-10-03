@@ -3,6 +3,7 @@ fastapi
 httpx
 markdown
 pydantic
+pyyaml
 python-docx
 python-dotenv
 python-multipart

@@ -1,0 +1,152 @@
+services:
+  - name: "Rich Text Parser"
+    summary: "Convert HTML or Markdown into Google Docs batchUpdate operations for automated document assembly."
+    docs_url: "http://localhost:8000/docs#/parser"
+    endpoints:
+      - method: "POST"
+        path: "/parse/html"
+        description: "Convert HTML markup into Google Docs batchUpdate requests."
+        request:
+          content_type: "application/json"
+          model: "HTMLParseRequest"
+          fields:
+            html: "string – HTML markup to convert."
+          example:
+            html: "<h1>Hello World</h1><p>This becomes a Google Doc.</p>"
+        response:
+          content_type: "application/json"
+          model: "GoogleDocsBatchUpdate"
+          fields:
+            requests: "list – Google Docs API batchUpdate operations."
+          example:
+            requests:
+              - insertText:
+                  location:
+                    index: 1
+                  text: "Hello World\n"
+      - method: "POST"
+        path: "/parse/markdown"
+        description: "Convert Markdown into Google Docs batchUpdate requests via the HTML pipeline."
+        request:
+          content_type: "application/json"
+          model: "MarkdownParseRequest"
+          fields:
+            markdown: "string – Markdown content to convert."
+          example:
+            markdown: "# Release Notes\n- Item one\n- Item two"
+        response:
+          content_type: "application/json"
+          model: "GoogleDocsBatchUpdate"
+          fields:
+            requests: "list – Google Docs API batchUpdate operations."
+      - method: "POST"
+        path: "/parse/docs/html"
+        description: "Synchronous HTML conversion helper for Google Docs batchUpdate payloads."
+        request:
+          content_type: "application/json"
+          model: "HTMLParseRequest"
+          fields:
+            html: "string – HTML markup to convert."
+        response:
+          content_type: "application/json"
+          fields:
+            requests: "list – Google Docs API batchUpdate operations."
+        notes:
+          - "Optimized for n8n HTTP Request nodes where async queues are unnecessary."
+      - method: "POST"
+        path: "/parse/docs/markdown"
+        description: "Synchronous Markdown conversion helper for Google Docs batchUpdate payloads."
+        request:
+          content_type: "application/json"
+          model: "MarkdownParseRequest"
+          fields:
+            markdown: "string – Markdown content to convert."
+        response:
+          content_type: "application/json"
+          fields:
+            requests: "list – Google Docs API batchUpdate operations."
+      - method: "POST"
+        path: "/parse/queue/html"
+        description: "Enqueue HTML conversion work to Redis/RQ for long-running jobs."
+        request:
+          content_type: "application/json"
+          model: "HTMLParseRequest"
+          fields:
+            html: "string – HTML markup to convert."
+        response:
+          content_type: "application/json"
+          model: "EnqueueResponse"
+          fields:
+            job_id: "string – Identifier that can be polled via /parse/job/{id}."
+      - method: "POST"
+        path: "/parse/queue/markdown"
+        description: "Enqueue Markdown conversion work to Redis/RQ for long-running jobs."
+        request:
+          content_type: "application/json"
+          model: "MarkdownParseRequest"
+          fields:
+            markdown: "string – Markdown content to convert."
+        response:
+          content_type: "application/json"
+          model: "EnqueueResponse"
+          fields:
+            job_id: "string – Identifier that can be polled via /parse/job/{id}."
+      - method: "GET"
+        path: "/parse/job/{job_id}"
+        description: "Check the status of a queued conversion job."
+        response:
+          content_type: "application/json"
+          fields:
+            status: "string – queued|started|finished|failed|unknown."
+            result: "object – Present when status=finished."
+            error: "string – Present when status=failed."
+  - name: "Google Docs JSON Parser"
+    summary: "Extract text, links, and image references from Google Docs JSON exports."
+    docs_url: "http://localhost:8000/docs#/Google_Docs_Parser"
+    endpoints:
+      - method: "POST"
+        path: "/parse/gdocs/json"
+        description: "Parse a Google Docs JSON payload produced by the Google Docs API."
+        request:
+          content_type: "application/json"
+          model: "GoogleDocs JSON"
+          fields:
+            Content: "object – Raw Google Docs document JSON."
+        response:
+          content_type: "application/json"
+          model: "GoogleDocsParseResponse"
+          fields:
+            text: "string – Plain text extracted from the document."
+            urls: "list – Hyperlinks that were present in the document."
+            images: "list – Image URLs present in the document."
+      - method: "POST"
+        path: "/parse/gdocs/file"
+        description: "Upload a Google Docs JSON export file and receive structured output."
+        request:
+          content_type: "multipart/form-data"
+          fields:
+            file: "file – Google Docs JSON export."
+        response:
+          content_type: "application/json"
+          model: "GoogleDocsParseResponse"
+          fields:
+            text: "string"
+            urls: "list"
+            images: "list"
+  - name: "Docx Toolkit"
+    summary: "Parse binary .docx uploads into structured responses and generate documents."
+    docs_url: "http://localhost:8000/docs#/docx"
+    endpoints:
+      - method: "POST"
+        path: "/docx/parse"
+        description: "Upload a binary .docx file and extract plain text."
+        request:
+          content_type: "application/octet-stream"
+          fields:
+            body: "bytes – Raw .docx binary data sent as the HTTP body."
+        response:
+          content_type: "application/json"
+          fields:
+            text: "string – Extracted plain text."
+            size_bytes: "integer – Size of the uploaded file in bytes."
+            content_type: "string – Content-Type header received from the client."
