@@ -69,25 +69,35 @@ class ControlCenterUI:
     }
 
     def __init__(self, host: str, port: int) -> None:
+        # Basic connection info
         self._host = host
         self._port = port
         self._base_url = f"http://{host}:{port}"
+
+        # Threading and root window (created later)
         self._thread: Optional[threading.Thread] = None
-        self._root: Optional[tk.Tk] = None if tk else None
-        self._cards_canvas: Optional[tk.Canvas] = None
-        self._cards_frame: Optional[ttk.Frame] = None
-        self._cards_scroller: Optional[ScrolledFrame] = None
-        self._mini_text: Optional[tk.Text] = None
-        self._log_text: Optional[tk.Text] = None
-        self._health_label: Optional[tk.Label] = None
-        self._health_time_label: Optional[tk.Label] = None
+        self._root: Optional["tk.Tk"] = None if tk else None
+
+        # UI components (populated when the UI is built)
+        self._cards_canvas: Optional["tk.Canvas"] = None
+        self._cards_frame: Optional["ttk.Frame"] = None
+        self._cards_scroller: Optional["ScrolledFrame"] = None
+        self._mini_text: Optional["tk.Text"] = None
+        self._log_text: Optional["tk.Text"] = None
+        self._health_label: Optional["tk.Label"] = None
+        self._health_time_label: Optional["tk.Label"] = None
         self._health_status: Optional[str] = None
-        self._toast_var: Optional[tk.StringVar] = tk.StringVar(value="") if tk else None
-        self._toast_label: Optional[ttk.Label] = None
-        self._toast_container: Optional[ttk.Frame] = None
+
+        # Don't create any Tk variables before a root window exists — create them
+        # later in _run_mainloop where we have a proper master/root.
+        self._toast_var: Optional["tk.StringVar"] = None
+        self._toast_label: Optional["ttk.Label"] = None
+        self._toast_container: Optional["ttk.Frame"] = None
         self._toast_after: Optional[str] = None
         self._log_callback: Optional[Callable[[str], None]] = None
-        self._doc_window: Optional[tk.Toplevel] = None
+        self._doc_window: Optional["tk.Toplevel"] = None
+
+        # Feature flags
         self._use_bootstrap = ttkb is not None and Window is not None and ttk is not None and tk is not None
         self._supported = tk is not None and ttk is not None
 
@@ -279,7 +289,17 @@ class ControlCenterUI:
             scroller = ScrolledFrame(cards_section, autohide=True)
             scroller.pack(fill="both", expand=True)
             self._cards_scroller = scroller
-            cards_parent = ttk.Frame(scroller.scrollable_frame, style="CardContainer.TFrame")
+            # Different ttkbootstrap versions expose the inner frame under
+            # different attribute names. Try common names and fall back to
+            # using the scroller itself as the parent.
+            inner_container = (
+                getattr(scroller, "scrollable_frame", None)
+                or getattr(scroller, "scrolled_frame", None)
+                or getattr(scroller, "frame", None)
+                or getattr(scroller, "interior", None)
+                or scroller
+            )
+            cards_parent = ttk.Frame(inner_container, style="CardContainer.TFrame")
             cards_parent.pack(fill="both", expand=True)
             self._cards_frame = cards_parent
             self._cards_canvas = None
