@@ -11,6 +11,7 @@ import uvicorn
 from app.extensions import local_queue_extension
 from app.main import app
 from app.runtime.documentation import render_request_overview
+from app.runtime.gui import ControlCenterUI
 from app.runtime.tray import SystemTrayController
 from app.runtime.worker import BackgroundWorkerController
 from app.services.parser_service import parse_html_to_docs_sync
@@ -62,7 +63,10 @@ def main() -> None:
     """Entry point used by run_all.py."""
     host, port = _get_host_port()
 
+    control_center = ControlCenterUI(host, port)
     tray = SystemTrayController()
+    if control_center.is_supported():
+        tray.register_callbacks(on_open=control_center.show)
     tray.start(host, port)
 
     worker = BackgroundWorkerController(local_queue_extension, handler=_job_handler)
@@ -74,11 +78,19 @@ def main() -> None:
     if not _wait_for_http_ready(host, port):
         print("ERROR: HTTP server did not start within timeout")
         tray.update_status("Failed to start")
+        control_center.close()
         tray.stop()
         return
 
     _print_summary(host, port)
     tray.update_status("Running")
+    if tray.is_available() and control_center.is_supported():
+        print("\n📌  Click the Tools API tray icon and choose 'Open Control Center' to explore the GUI dashboard.")
+    elif control_center.is_supported():
+        print("\nℹ️  System tray is unavailable, launching the Tools API Control Center window directly.")
+        control_center.show()
+    else:
+        print("\nℹ️  Desktop UI libraries are missing, so continue using the terminal output for status and documentation.")
     print("\nRun the process in the foreground to keep services running. Ctrl+C to stop.")
 
     try:
@@ -88,6 +100,7 @@ def main() -> None:
         print("Shutting down...")
         worker.stop()
         tray.update_status("Stopped")
+        control_center.close()
         tray.stop()
 
 
