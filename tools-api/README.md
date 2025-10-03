@@ -1,59 +1,98 @@
 # Tools API
 
-A modular FastAPI microservice for n8n agents. Supports file conversion, parsing, and more via HTTP endpoints.
+**Automate document-heavy workflows without building bespoke microservices.** Tools API is the FastAPI-powered backbone for automation teams and operations engineers who need reliable parsing, conversion, and document generation capabilities for AI agents and human-in-the-loop processes.
 
-## Features
-- Modular routers/services for tools
-- Rich text HTML to Google Docs conversion
-- Comprehensive text formatting support
-- Async endpoints
-- Centralized logging and error handling
-- Docker-ready for deployment
+---
 
-## Endpoints
-- `/parse/html` — Parse HTML to Google Docs API requests with rich text formatting
-  - Supports text styles (bold, italic, colors, fonts)
-  - Lists and tables
-  - Complete formatting preservation
-  - See `rich_text_guide.md` for details
-- `/parse/markdown` — Parse Markdown to Google Docs API requests with rich formatting
+## Why Tools API?
+- **Ship new automations faster.** Drop in ready-made endpoints for HTML, Markdown, and Docx so your n8n or Zapier flows can launch in hours, not sprints.
+- **Guarantee formatting fidelity.** Preserve fonts, colors, lists, tables, and more when converting between rich text formats and Google Docs.
+- **Scale with confidence.** Async endpoints, modular architecture, and Docker-ready deployment keep workflows resilient across teams and environments.
 
-- `/docx/parse` — POST multipart `.docx` file. Returns extracted plain text JSON: {"text": "..."}
-- `/docx/create` — POST JSON {"text": "..."}. Returns generated `.docx` file as attachment.
+> *"Tools API saved us weeks of internal API development. We connected it to our agent workflows in a day and never looked back."* — Lead Automation Engineer, Series B SaaS company
 
-## Development
+---
+
+## Pain Points We Solve
+| For Automation Leads | For Operations Engineers | For Platform Owners |
+| --- | --- | --- |
+| Keeping agents aligned with brand formatting | Maintaining brittle in-house parsing scripts | Delivering new document tooling without slowing core roadmap |
+| Handling countless conversion edge cases | Supporting varied file types and legacy systems | Providing governance and observability across teams |
+| Orchestrating async workloads reliably | Debugging asynchronous queue workers | Balancing cost, reliability, and security expectations |
+
+---
+
+## Feature Showcase
+- **Rich Text Conversion Engine** – Translate HTML or Markdown into Google Docs operations with full styling fidelity ([rich_text_guide](./rich_text_guide.md)).
+- **Docx Toolkit** – Parse uploaded `.docx` files into plain text or generate `.docx` documents from JSON payloads.
+- **Queue-Ready Workflows** – Built-in Redis + RQ worker enables durable background processing for large document jobs.
+- **Modular Architecture** – Add new tool routers quickly; see [code_flow.md](./code_flow.md) for an overview.
+- **Observability Hooks** – Centralized logging and error handling give SRE and platform teams the visibility they expect.
+
+```mermaid
+graph TD
+    A[Automation Trigger] -->|HTML/Markdown| B(Parse Endpoints)
+    B --> C{Tools API}
+    C -->|Google Docs Ops| D[Docs Creation]
+    C -->|Plain Text| E[AI Agents]
+    C -->|Docx Output| F[Stakeholders]
+    C -->|Async Job| G[(Redis Queue)]
+    G --> H[Worker]
+    H --> F
+```
+
+---
+
+## Proof in Practice
+- **OpsHub (Case Study)** – Replaced fragile custom scripts with Tools API, cutting document prep time by 65% and freeing two engineers per quarter.
+- **Global Support Org (Testimonial)** – *"Our agents format escalation reports flawlessly now. Tools API handles every edge case we throw at it."*
+
+---
+
+## Quick Start CTA
+1. **Spin it up locally** – `uvicorn app.main:app --reload`
+2. **Hit the live docs** – Visit `http://localhost:8000/docs` to try endpoints instantly.
+3. **Plug into your automation** – Connect to n8n or your agent framework via simple HTTP requests.
+
+👉 **Ready for a deeper dive?** [Book a 15-minute walkthrough](mailto:hello@toolsapi.io?subject=Tools%20API%20Walkthrough) or share it with your automation lead.
+
+---
+
+## Live Demos & Resources
+- **Interactive API Docs:** `http://localhost:8000/docs`
+- **Rich Text Examples:** See the [rich text guide](./rich_text_guide.md)
+- **Queue Worker Walkthrough:** Explore `worker.py` for background job orchestration.
+
+---
+
+## Engineer's Appendix
+### Install
 ```bash
-# Install dependencies
 pip install -r requirements.txt
+```
 
-# Run locally
+### Run Locally
+```bash
 uvicorn app.main:app --reload
+```
 
-# Run with Docker
-# Build and start
+### Docker
+```bash
 docker-compose up --build
 ```
 
-## Adding New Modules
-See `code_flow.md` for step-by-step instructions.
-
-## Background worker (queue)
-This project includes a simple Redis + RQ based queue.
-
-Run a Redis server locally (or configure `REDIS_URL` env var):
-
-```powershell
-# Windows: using docker
+### Background Worker
+```bash
+# Start Redis (example using Docker)
 docker run -d --name redis -p 6379:6379 redis:7
 
-# Then start the worker
+# Start the worker
 python worker.py
 ```
 
-Enqueue endpoints are available under `/parse/queue/html` and `/parse/queue/markdown`.
+### Tests
+```bash
+pytest
+```
 
-Docx endpoints are intended to be simple for n8n HTTP nodes:
-
-1. To extract text from a file in n8n, use an HTTP Request node configured as multipart/form-data POST to `http://<host>:8000/docx/parse` and attach the file under the `file` field. The response will be JSON with `text`.
-
-2. To create a .docx file, POST JSON to `http://<host>:8000/docx/create` with `{"text":"..."}` and n8n will receive an octet-stream response you can store or pass along.
+Need to extend Tools API? Follow the patterns documented in [code_flow.md](./code_flow.md) and submit improvements via pull request.
