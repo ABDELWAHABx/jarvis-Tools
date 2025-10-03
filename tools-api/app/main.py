@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from app.routers import parser, docx
+from app.extensions import local_queue_extension
 from app.utils.logger import logger
 from app.config import settings
 import time
@@ -46,6 +47,7 @@ async def log_requests(request: Request, call_next):
 # Routers
 app.include_router(parser.router, prefix="/parse", tags=["parser"])
 app.include_router(docx.router)  # Already has /docx prefix
+local_queue_extension.register(app)
 
 
 # Custom exception handler for 422 Validation Errors (crucial for debugging n8n issues)

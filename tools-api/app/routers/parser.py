@@ -87,3 +87,25 @@ def job_status(job_id: str):
     except Exception as e:
         logger.error(f"Job status error: {e}")
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/docs/html")
+def parse_docs_html_endpoint(request: HTMLParseRequest):
+    """Return Google Docs batchUpdate requests for the supplied HTML."""
+    try:
+        requests = parse_html_to_docs_sync(request.html)
+        return {"requests": requests}
+    except Exception as e:
+        logger.error(f"Docs HTML parse error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/docs/markdown")
+def parse_docs_markdown_endpoint(request: MarkdownParseRequest):
+    """Return Google Docs batchUpdate requests for the supplied Markdown."""
+    try:
+        requests = parse_markdown_to_docs_sync(request.markdown)
+        return {"requests": requests}
+    except Exception as e:
+        logger.error(f"Docs Markdown parse error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
