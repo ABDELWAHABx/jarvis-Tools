@@ -159,6 +159,59 @@ def render_documentation() -> str:
     return "\n".join(_documentation_lines())
 
 
+def render_request_overview(host: str, port: int) -> str:
+    """Return a concise overview highlighting endpoints and their inputs."""
+
+    base_url = f"http://{host}:{port}"
+    lines: List[str] = [
+        "",
+        "Tools API — Quickstart",
+        "=" * 40,
+        f"Base URL: {base_url}",
+        "",
+        "Endpoints and accepted input:",
+    ]
+
+    catalog = _load_catalog()
+    error = catalog.get("error") if isinstance(catalog, dict) else None
+
+    if error:
+        lines.append(f"⚠️  {error}")
+        lines.append("Review docs/service_catalog.yaml to document API requests.")
+        return "\n".join(lines)
+
+    services = catalog.get("services") if isinstance(catalog, dict) else None
+    if not services:
+        lines.append("No services documented yet.")
+        return "\n".join(lines)
+
+    for service in services:
+        service_name = service.get("name", "Service")
+        lines.append("")
+        lines.append(service_name)
+        for endpoint in service.get("endpoints", []):
+            method = str(endpoint.get("method", "GET")).upper()
+            path = endpoint.get("path", "/")
+            request_spec: Optional[Dict[str, Any]] = endpoint.get("request")
+            descriptor = f"  {method} {path}"
+            if request_spec:
+                content_type = request_spec.get("content_type")
+                if content_type:
+                    descriptor += f" ({content_type})"
+            lines.append(descriptor)
+
+            fields = request_spec.get("fields") if isinstance(request_spec, dict) else None
+            if isinstance(fields, dict) and fields:
+                for field, description in fields.items():
+                    lines.append(f"    - {field}: {description}")
+            else:
+                lines.append("    - No body fields documented.")
+
+    lines.append("")
+    lines.append("Press Ctrl+C to stop the server.")
+    return "\n".join(lines)
+
+
 def print_documentation() -> None:
     """Print the documentation banner to stdout."""
 

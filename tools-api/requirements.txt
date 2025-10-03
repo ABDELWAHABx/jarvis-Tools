@@ -3,6 +3,8 @@ fastapi
 httpx
 markdown
 pydantic
+pystray
+pillow
 pyyaml
 python-docx
 python-dotenv
