@@ -1,197 +1,314 @@
-services:
-  - name: "Rich Text Parser"
-    summary: "Turn HTML or Markdown into Google Docs-friendly instructions so agents can create polished docs automatically."
-    docs_url: "http://localhost:8000/docs#/parser"
-    endpoints:
-      - method: "POST"
-        path: "/parse/html"
-        headline: "HTML to Google Docs"
-        tagline: "Feed marketing-approved HTML and receive the Google Docs operations to recreate it."
-        description: "Convert HTML markup into Google Docs batchUpdate requests."
-        request:
-          content_type: "application/json"
-          model: "HTMLParseRequest"
-          fields:
-            html: "string – HTML markup to convert."
-          example:
-            html: "<h1>Hello World</h1><p>This becomes a Google Doc.</p>"
-        response:
-          content_type: "application/json"
-          model: "GoogleDocsBatchUpdate"
-          fields:
-            requests: "list – Google Docs API batchUpdate operations."
-          example:
-            requests:
-              - insertText:
-                  location:
-                    index: 1
-                  text: "Hello World\n"
-      - method: "POST"
-        path: "/parse/markdown"
-        headline: "Markdown to Google Docs"
-        tagline: "Turn Markdown release notes into Google Docs-ready edits."
-        description: "Convert Markdown into Google Docs batchUpdate requests via the HTML pipeline."
-        request:
-          content_type: "application/json"
-          model: "MarkdownParseRequest"
-          fields:
-            markdown: "string – Markdown content to convert."
-          example:
-            markdown: "# Release Notes\n- Item one\n- Item two"
-        response:
-          content_type: "application/json"
-          model: "GoogleDocsBatchUpdate"
-          fields:
-            requests: "list – Google Docs API batchUpdate operations."
-      - method: "POST"
-        path: "/parse/docs/html"
-        headline: "HTML quick convert"
-        tagline: "Convert HTML instantly without touching the async queue."
-        description: "Synchronous HTML conversion helper for Google Docs batchUpdate payloads."
-        request:
-          content_type: "application/json"
-          model: "HTMLParseRequest"
-          fields:
-            html: "string – HTML markup to convert."
-        response:
-          content_type: "application/json"
-          fields:
-            requests: "list – Google Docs API batchUpdate operations."
-        notes:
-          - "Optimized for n8n HTTP Request nodes where async queues are unnecessary."
-      - method: "POST"
-        path: "/parse/docs/markdown"
-        headline: "Markdown quick convert"
-        tagline: "Use when you want Markdown converted to Google Docs edits in real time."
-        description: "Synchronous Markdown conversion helper for Google Docs batchUpdate payloads."
-        request:
-          content_type: "application/json"
-          model: "MarkdownParseRequest"
-          fields:
-            markdown: "string – Markdown content to convert."
-        response:
-          content_type: "application/json"
-          fields:
-            requests: "list – Google Docs API batchUpdate operations."
-      - method: "POST"
-        path: "/parse/queue/html"
-        headline: "Queue HTML conversion"
-        tagline: "Hand off large HTML conversions to the background worker and poll later."
-        description: "Enqueue HTML conversion work to Redis/RQ for long-running jobs."
-        request:
-          content_type: "application/json"
-          model: "HTMLParseRequest"
-          fields:
-            html: "string – HTML markup to convert."
-        response:
-          content_type: "application/json"
-          model: "EnqueueResponse"
-          fields:
-            job_id: "string – Identifier that can be polled via /parse/job/{id}."
-      - method: "POST"
-        path: "/parse/queue/markdown"
-        headline: "Queue Markdown conversion"
-        tagline: "Offload Markdown conversions to the queue when they might take a while."
-        description: "Enqueue Markdown conversion work to Redis/RQ for long-running jobs."
-        request:
-          content_type: "application/json"
-          model: "MarkdownParseRequest"
-          fields:
-            markdown: "string – Markdown content to convert."
-        response:
-          content_type: "application/json"
-          model: "EnqueueResponse"
-          fields:
-            job_id: "string – Identifier that can be polled via /parse/job/{id}."
-      - method: "GET"
-        path: "/parse/job/{job_id}"
-        headline: "Check queued job"
-        tagline: "See whether a queued conversion is still running, finished, or failed."
-        description: "Check the status of a queued conversion job."
-        response:
-          content_type: "application/json"
-          fields:
-            status: "string – queued|started|finished|failed|unknown."
-            result: "object – Present when status=finished."
-            error: "string – Present when status=failed."
-  - name: "Google Docs JSON Parser"
-    summary: "Pull plain text, links, and image references out of Google Docs JSON exports for downstream automations."
-    docs_url: "http://localhost:8000/docs#/Google_Docs_Parser"
-    endpoints:
-      - method: "POST"
-        path: "/parse/gdocs/json"
-        headline: "Docs to text"
-        tagline: "Paste a Google Docs JSON export and receive clean text, links, and image references."
-        description: "Parse a Google Docs JSON payload produced by the Google Docs API."
-        request:
-          content_type: "application/json"
-          model: "GoogleDocs JSON"
-          fields:
-            Content: "object – Raw Google Docs document JSON."
-        response:
-          content_type: "application/json"
-          model: "GoogleDocsParseResponse"
-          fields:
-            text: "string – Plain text extracted from the document."
-            urls: "list – Hyperlinks that were present in the document."
-            images: "list – Image URLs present in the document."
-      - method: "POST"
-        path: "/parse/gdocs/file"
-        headline: "Docs file to text"
-        tagline: "Upload a saved Google Docs JSON file and pull out the essentials."
-        description: "Upload a Google Docs JSON export file and receive structured output."
-        request:
-          content_type: "multipart/form-data"
-          fields:
-            file: "file – Google Docs JSON export."
-        response:
-          content_type: "application/json"
-          model: "GoogleDocsParseResponse"
-          fields:
-            text: "string"
-            urls: "list"
-            images: "list"
-  - name: "Docx Toolkit"
-    summary: "Quickly turn uploaded .docx files into plain text for agents or LLMs."
-    docs_url: "http://localhost:8000/docs#/docx"
-    endpoints:
-      - method: "POST"
-        path: "/docx/parse"
-        headline: "DOCX to plain text"
-        tagline: "Send a .docx file and get back clean text with file metadata."
-        description: "Upload a binary .docx file and extract plain text."
-        request:
-          content_type: "application/octet-stream"
-          fields:
-            body: "bytes – Raw .docx binary data sent as the HTTP body."
-        response:
-          content_type: "application/json"
-          fields:
-            text: "string – Extracted plain text."
-            size_bytes: "integer – Size of the uploaded file in bytes."
-            content_type: "string – Content-Type header received from the client."
-  - name: "JavaScript Tool Bridge"
-    summary: "Expose curated Node.js utilities – like the panorama splitter – through Tools API endpoints."
-    docs_url: "http://localhost:8000/docs#/javascript-tools/panosplitter_js_tools_panosplitter_post"
-    endpoints:
-      - method: "POST"
-        path: "/js-tools/panosplitter"
-        headline: "Panorama to Instagram-ready tiles"
-        tagline: "Upload a panoramic image and receive Instagram-ready slices plus a shareable full preview."
-        description: "Runs the bundled JavaScript panosplitter CLI via Node.js to generate slices and a full-view preview."
-        request:
-          content_type: "multipart/form-data"
-          fields:
-            image: "file – Panorama image (JPEG/PNG) to process."
-            high_res: "boolean – Optional. Enable to keep the original height for higher resolution slices."
-        response:
-          content_type: "application/json"
-          model: "PanosplitterResponse"
-          fields:
-            metadata: "object – Slice counts, dimensions, and original filename."
-            zip_file: "object – Base64 zip archive bundling all generated JPEGs."
-            slices: "list – Base64-encoded slices with dimensions."
-            full_view: "object – Base64-encoded hero panel for carousel cover."
-        notes:
-          - "Dependencies install automatically on first run (Node.js + npm required)."
-          - "Returns both individual slices and a convenience .zip for workflows like n8n."
+{
+  "services": [
+    {
+      "name": "Rich Text Parser",
+      "summary": "Turn HTML or Markdown into Google Docs-friendly instructions so agents can create polished docs automatically.",
+      "docs_url": "http://localhost:8000/docs#/parser",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/parse/html",
+          "headline": "HTML to Google Docs",
+          "tagline": "Feed marketing-approved HTML and receive the Google Docs operations to recreate it.",
+          "description": "Convert HTML markup into Google Docs batchUpdate requests.",
+          "request": {
+            "content_type": "application/json",
+            "model": "HTMLParseRequest",
+            "fields": {
+              "html": "string – HTML markup to convert."
+            },
+            "example": {
+              "html": "<h1>Hello World</h1><p>This becomes a Google Doc.</p>"
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "model": "GoogleDocsBatchUpdate",
+            "fields": {
+              "requests": "list – Google Docs API batchUpdate operations."
+            },
+            "example": {
+              "requests": [
+                {
+                  "insertText": {
+                    "location": {
+                      "index": 1
+                    },
+                    "text": "Hello World\n"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/parse/markdown",
+          "headline": "Markdown to Google Docs",
+          "tagline": "Turn Markdown release notes into Google Docs-ready edits.",
+          "description": "Convert Markdown into Google Docs batchUpdate requests via the HTML pipeline.",
+          "request": {
+            "content_type": "application/json",
+            "model": "MarkdownParseRequest",
+            "fields": {
+              "markdown": "string – Markdown content to convert."
+            },
+            "example": {
+              "markdown": "# Release Notes\n- Item one\n- Item two"
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "model": "GoogleDocsBatchUpdate",
+            "fields": {
+              "requests": "list – Google Docs API batchUpdate operations."
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/parse/docs/html",
+          "headline": "HTML quick convert",
+          "tagline": "Convert HTML instantly without touching the async queue.",
+          "description": "Synchronous HTML conversion helper for Google Docs batchUpdate payloads.",
+          "request": {
+            "content_type": "application/json",
+            "model": "HTMLParseRequest",
+            "fields": {
+              "html": "string – HTML markup to convert."
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "fields": {
+              "requests": "list – Google Docs API batchUpdate operations."
+            }
+          },
+          "notes": [
+            "Optimized for n8n HTTP Request nodes where async queues are unnecessary."
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/parse/docs/markdown",
+          "headline": "Markdown quick convert",
+          "tagline": "Use when you want Markdown converted to Google Docs edits in real time.",
+          "description": "Synchronous Markdown conversion helper for Google Docs batchUpdate payloads.",
+          "request": {
+            "content_type": "application/json",
+            "model": "MarkdownParseRequest",
+            "fields": {
+              "markdown": "string – Markdown content to convert."
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "fields": {
+              "requests": "list – Google Docs API batchUpdate operations."
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/parse/queue/html",
+          "headline": "Queue HTML conversion",
+          "tagline": "Hand off large HTML conversions to the background worker and poll later.",
+          "description": "Enqueue HTML conversion work to Redis/RQ for long-running jobs.",
+          "request": {
+            "content_type": "application/json",
+            "model": "HTMLParseRequest",
+            "fields": {
+              "html": "string – HTML markup to convert."
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "model": "EnqueueResponse",
+            "fields": {
+              "job_id": "string – Identifier that can be polled via /parse/job/{id}."
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/parse/queue/markdown",
+          "headline": "Queue Markdown conversion",
+          "tagline": "Offload Markdown conversions to the queue when they might take a while.",
+          "description": "Enqueue Markdown conversion work to Redis/RQ for long-running jobs.",
+          "request": {
+            "content_type": "application/json",
+            "model": "MarkdownParseRequest",
+            "fields": {
+              "markdown": "string – Markdown content to convert."
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "model": "EnqueueResponse",
+            "fields": {
+              "job_id": "string – Identifier that can be polled via /parse/job/{id}."
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/parse/job/{job_id}",
+          "headline": "Check queued job",
+          "tagline": "See whether a queued conversion is still running, finished, or failed.",
+          "description": "Check the status of a queued conversion job.",
+          "response": {
+            "content_type": "application/json",
+            "fields": {
+              "status": "string – queued|started|finished|failed|unknown.",
+              "result": "object – Present when status=finished.",
+              "error": "string – Present when status=failed."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Google Docs JSON Parser",
+      "summary": "Pull plain text, links, and image references out of Google Docs JSON exports for downstream automations.",
+      "docs_url": "http://localhost:8000/docs#/Google_Docs_Parser",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/parse/gdocs/json",
+          "headline": "Docs to text",
+          "tagline": "Paste a Google Docs JSON export and receive clean text, links, and image references.",
+          "description": "Parse a Google Docs JSON payload produced by the Google Docs API.",
+          "request": {
+            "content_type": "application/json",
+            "model": "GoogleDocs JSON",
+            "fields": {
+              "Content": "object – Raw Google Docs document JSON."
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "model": "GoogleDocsParseResponse",
+            "fields": {
+              "text": "string – Plain text extracted from the document.",
+              "urls": "list – Hyperlinks that were present in the document.",
+              "images": "list – Image URLs present in the document."
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/parse/gdocs/file",
+          "headline": "Docs file to text",
+          "tagline": "Upload a saved Google Docs JSON file and pull out the essentials.",
+          "description": "Upload a Google Docs JSON export file and receive structured output.",
+          "request": {
+            "content_type": "multipart/form-data",
+            "fields": {
+              "file": "file – Google Docs JSON export."
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "model": "GoogleDocsParseResponse",
+            "fields": {
+              "text": "string",
+              "urls": "list",
+              "images": "list"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Docx Toolkit",
+      "summary": "Quickly turn uploaded .docx files into plain text for agents or LLMs.",
+      "docs_url": "http://localhost:8000/docs#/docx",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/docx/parse",
+          "headline": "DOCX to plain text",
+          "tagline": "Send a .docx file and get back clean text with file metadata.",
+          "description": "Upload a binary .docx file and extract plain text.",
+          "request": {
+            "content_type": "application/octet-stream",
+            "fields": {
+              "body": "bytes – Raw .docx binary data sent as the HTTP body."
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "fields": {
+              "text": "string – Extracted plain text.",
+              "size_bytes": "integer – Size of the uploaded file in bytes.",
+              "content_type": "string – Content-Type header received from the client."
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "JavaScript Tool Bridge",
+      "summary": "Expose curated Node.js utilities – like the panorama splitter – through Tools API endpoints.",
+      "docs_url": "http://localhost:8000/docs#/javascript-tools/panosplitter_js_tools_panosplitter_post",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/js-tools/panosplitter",
+          "headline": "Panorama to Instagram-ready tiles",
+          "tagline": "Upload a panoramic image and receive Instagram-ready slices plus a shareable full preview.",
+          "description": "Runs the bundled JavaScript panosplitter CLI via Node.js to generate slices and a full-view preview.",
+          "request": {
+            "content_type": "multipart/form-data",
+            "fields": {
+              "image": "file – Panorama image (JPEG/PNG) to process.",
+              "high_res": "boolean – Optional. Enable to keep the original height for higher resolution slices."
+            }
+          },
+          "response": {
+            "content_type": "application/json",
+            "model": "PanosplitterResponse",
+            "fields": {
+              "metadata": "object – Slice counts, dimensions, and original filename.",
+              "zip_file": "object – Base64 zip archive bundling all generated JPEGs.",
+              "slices": "list – Base64-encoded slices with dimensions.",
+              "full_view": "object – Base64-encoded hero panel for carousel cover.",
+              "manifest": "object – Metadata and file listing also embedded as manifest.json inside the zip archive."
+            }
+          },
+          "notes": [
+            "Dependencies install automatically on first run (Node.js + npm required).",
+            "Append `response_format=binary` to receive the raw .zip archive plus an `X-Panosplitter-Manifest` header for n8n binary items."
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/js-tools/cobalt",
+          "headline": "Cobalt-powered media downloads",
+          "tagline": "Proxy downloads from your Cobalt instance while keeping automations in one place.",
+          "description": "Forwards requests to a configured Cobalt media downloader deployment and optionally streams the resulting file.",
+          "request": {
+            "content_type": "application/json",
+            "fields": {
+              "url": "string – Source URL accepted by Cobalt (YouTube, TikTok, Instagram, etc.).",
+              "response_format": "string – `json` (default) or `binary` to stream the file back to the caller.",
+              "download_filename": "string – Optional filename override when streaming the binary response.",
+              "additional_fields": "All other keys are passed directly to Cobalt (audioFormat, videoQuality, service-specific toggles)."
+            }
+          },
+          "response": {
+            "content_type": "application/json | application/octet-stream",
+            "fields": {
+              "status": "string – Cobalt status such as tunnel/redirect/picker/error.",
+              "url": "string – Present when Cobalt returns a downloadable link."
+            },
+            "notes": [
+              "Set the environment variable `COBALT_API_BASE_URL` (and optional auth scheme/token) before using this endpoint.",
+              "When requesting `response_format=binary`, Tools API returns the media bytes and a `X-Cobalt-Metadata` header containing the JSON payload (base64)."
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

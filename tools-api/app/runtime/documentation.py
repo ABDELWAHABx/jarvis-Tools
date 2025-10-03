@@ -26,12 +26,7 @@ def _pretty_json(data: Any) -> str:
 
 
 def _load_catalog() -> Dict[str, Any]:
-    """Load the service catalog YAML file into a dictionary."""
-
-    if yaml is None:
-        return {
-            "error": "PyYAML is not installed. Install it or update requirements.txt to enable the service catalog printer.",
-        }
+    """Load the service catalog YAML (or JSON) file into a dictionary."""
 
     if not CATALOG_PATH.exists():
         return {
@@ -40,9 +35,21 @@ def _load_catalog() -> Dict[str, Any]:
 
     try:
         contents = CATALOG_PATH.read_text(encoding="utf-8")
-        catalog = yaml.safe_load(contents)
+        if yaml is not None:
+            try:
+                catalog = yaml.safe_load(contents)
+            except Exception:  # pragma: no cover - fall back to JSON parsing
+                catalog = None
+        else:
+            catalog = None
+
+        if catalog is None:
+            try:
+                catalog = json.loads(contents)
+            except json.JSONDecodeError as exc:
+                return {"error": f"Failed to parse service catalog: {exc}"}
     except Exception as exc:  # pragma: no cover - defensive logging
-        return {"error": f"Failed to parse service catalog: {exc}"}
+        return {"error": f"Failed to read service catalog: {exc}"}
 
     if not isinstance(catalog, dict):
         return {"error": "Service catalog must be a mapping with a 'services' key."}

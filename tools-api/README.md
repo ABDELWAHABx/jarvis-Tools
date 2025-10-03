@@ -27,7 +27,7 @@
 - **Docx Toolkit** – Parse uploaded `.docx` files into plain text or generate `.docx` documents from JSON payloads.
 - **Queue-Ready Workflows** – Built-in Redis + RQ worker enables durable background processing for large document jobs.
 - **Modular Architecture** – Add new tool routers quickly; see [code_flow.md](./code_flow.md) for an overview.
-- **JavaScript Tool Bridge** – Wrap Node.js utilities (like the panorama splitter) in Python-friendly REST endpoints.
+- **JavaScript Tool Bridge** – Wrap Node.js utilities (like the panorama splitter and Cobalt media downloader) in Python-friendly REST endpoints with binary-friendly delivery for n8n.
 - **Observability Hooks** – Centralized logging and error handling give SRE and platform teams the visibility they expect.
 
 ```mermaid
@@ -62,6 +62,7 @@ graph TD
 ## Live Demos & Resources
 - **Interactive API Docs:** `http://localhost:8000/docs`
 - **Rich Text Examples:** See the [rich text guide](./rich_text_guide.md)
+- **Cobalt Integration Guide:** Configure a Cobalt instance for media downloads via `/js-tools/cobalt` (see below).
 - **Queue Worker Walkthrough:** Explore `worker.py` for background job orchestration.
 
 ---
@@ -87,6 +88,24 @@ npm install
 ```
 
 When the API boots it will run `npm install` for you if `node_modules/` is missing.
+
+#### Binary responses & n8n compatibility
+- **Panosplitter:** add `response_format=binary` to receive a ready-to-share `.zip` archive. The archive now includes a `manifest.json` file for metadata, and the API echoes a `X-Panosplitter-Manifest` header (base64 JSON) that n8n can decode without parsing the body.
+- **Cobalt downloads:** set `response_format=binary` on `/js-tools/cobalt` to stream media directly for n8n's binary items. The response contains a `Content-Disposition` header plus `X-Cobalt-Metadata` with the originating JSON payload.
+
+#### Cobalt media downloader
+Expose an existing [Cobalt](https://github.com/imputnet/cobalt) deployment through Tools API:
+
+```bash
+export COBALT_API_BASE_URL="https://your-cobalt-instance.example"
+# Optional authentication if your instance requires it
+export COBALT_API_AUTH_SCHEME="Api-Key"
+export COBALT_API_AUTH_TOKEN="your-token"
+# Optional timeout override (seconds)
+export COBALT_API_TIMEOUT="90"
+```
+
+Once configured you can `POST /js-tools/cobalt` with any options supported by Cobalt's schema (for example `audioFormat`, `videoQuality`, or service-specific flags). Default responses return the raw JSON from Cobalt. Include `{"response_format": "binary"}` to download the media bytes directly via Tools API.
 
 ### Docker
 ```bash
