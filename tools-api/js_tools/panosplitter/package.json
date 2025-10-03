@@ -1,0 +1,24 @@
+{
+  "name": "tools-api-panosplitter",
+  "version": "1.0.0",
+  "description": "CLI wrapper that slices panorama images into Instagram-ready panels for Tools API.",
+  "bin": {
+    "panosplitter-cli": "cli.js"
+  },
+  "scripts": {
+    "install": "node -e 'process.exit(0)'"
+  },
+  "keywords": [
+    "panorama",
+    "instagram",
+    "sharp",
+    "tools-api"
+  ],
+  "author": "Tools API",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "minimist": "^1.2.8",
+    "sharp": "^0.33.2"
+  }
+}

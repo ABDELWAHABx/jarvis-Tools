@@ -170,3 +170,28 @@ services:
             text: "string – Extracted plain text."
             size_bytes: "integer – Size of the uploaded file in bytes."
             content_type: "string – Content-Type header received from the client."
+  - name: "JavaScript Tool Bridge"
+    summary: "Expose curated Node.js utilities – like the panorama splitter – through Tools API endpoints."
+    docs_url: "http://localhost:8000/docs#/javascript-tools/panosplitter_js_tools_panosplitter_post"
+    endpoints:
+      - method: "POST"
+        path: "/js-tools/panosplitter"
+        headline: "Panorama to Instagram-ready tiles"
+        tagline: "Upload a panoramic image and receive Instagram-ready slices plus a shareable full preview."
+        description: "Runs the bundled JavaScript panosplitter CLI via Node.js to generate slices and a full-view preview."
+        request:
+          content_type: "multipart/form-data"
+          fields:
+            image: "file – Panorama image (JPEG/PNG) to process."
+            high_res: "boolean – Optional. Enable to keep the original height for higher resolution slices."
+        response:
+          content_type: "application/json"
+          model: "PanosplitterResponse"
+          fields:
+            metadata: "object – Slice counts, dimensions, and original filename."
+            zip_file: "object – Base64 zip archive bundling all generated JPEGs."
+            slices: "list – Base64-encoded slices with dimensions."
+            full_view: "object – Base64-encoded hero panel for carousel cover."
+        notes:
+          - "Dependencies install automatically on first run (Node.js + npm required)."
+          - "Returns both individual slices and a convenience .zip for workflows like n8n."

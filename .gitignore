@@ -27,3 +27,6 @@ nosetests.xml
 .DS_Store
 Thumbs.db
 data/
+
+# JavaScript build artifacts
+tools-api/js_tools/**/node_modules/

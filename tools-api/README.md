@@ -27,6 +27,7 @@
 - **Docx Toolkit** – Parse uploaded `.docx` files into plain text or generate `.docx` documents from JSON payloads.
 - **Queue-Ready Workflows** – Built-in Redis + RQ worker enables durable background processing for large document jobs.
 - **Modular Architecture** – Add new tool routers quickly; see [code_flow.md](./code_flow.md) for an overview.
+- **JavaScript Tool Bridge** – Wrap Node.js utilities (like the panorama splitter) in Python-friendly REST endpoints.
 - **Observability Hooks** – Centralized logging and error handling give SRE and platform teams the visibility they expect.
 
 ```mermaid
@@ -75,6 +76,17 @@ pip install -r requirements.txt
 ```bash
 uvicorn app.main:app --reload
 ```
+
+### JavaScript-powered tools
+Some endpoints rely on Node.js tooling. Install Node 18+ and npm so the API can install dependencies on first run:
+
+```bash
+# Example: ensure dependencies for the bundled panorama splitter are installed
+cd tools-api/js_tools/panosplitter
+npm install
+```
+
+When the API boots it will run `npm install` for you if `node_modules/` is missing.
 
 ### Docker
 ```bash
