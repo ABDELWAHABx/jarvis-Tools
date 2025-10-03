@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import shutil
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -180,6 +182,48 @@ def _create_zip_payload(directory: Path, zip_name: str = "panosplitter_slices.zi
             tmp_path.unlink()
 
 
+def _sanitize_filename(filename: Optional[str]) -> str:
+    """Sanitize an untrusted filename supplied by the client.
+
+    - Strips any directory components by taking the basename.
+    - Replaces unsafe characters with underscores.
+    - Removes leading dots to avoid hidden/traversal names.
+    - Ensures a safe image extension (defaults to .jpg).
+    - Falls back to a generated name when necessary.
+    """
+    # If no filename provided, generate a unique one
+    if not filename:
+        return f"upload_{uuid.uuid4().hex}.jpg"
+
+    # Take basename to remove any path components
+    base = Path(filename).name
+
+    # Remove leading dots (e.g. ".bashrc" or "..")
+    base = base.lstrip(".")
+
+    # Split name and extension
+    name = Path(base).stem
+    ext = Path(base).suffix.lower()
+
+    # Replace any character that isn't alphanumeric, dot, underscore or dash
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+
+    if not name:
+        name = uuid.uuid4().hex
+
+    # Allow only a small set of image extensions; default to .jpg otherwise
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        ext = ".jpg"
+
+    safe = f"{name}{ext}"
+
+    # Enforce a maximum filename length to avoid surprises
+    if len(safe) > 255:
+        safe = safe[:255]
+
+    return safe
+
+
 def run_panosplitter(
     image_bytes: bytes,
     *,
@@ -199,7 +243,8 @@ def run_panosplitter(
     _ensure_dependencies(tool_dir)
 
     mode = "highres" if high_res else "standard"
-    filename = filename or "upload.jpg"
+    # Treat client-supplied filename as untrusted and sanitize it before use.
+    filename = _sanitize_filename(filename)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
