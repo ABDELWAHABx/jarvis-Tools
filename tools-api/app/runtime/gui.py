@@ -82,7 +82,7 @@ class ControlCenterUI:
         self._health_label: Optional[tk.Label] = None
         self._health_time_label: Optional[tk.Label] = None
         self._health_status: Optional[str] = None
-        self._toast_var: Optional[tk.StringVar] = None
+        self._toast_var: Optional[tk.StringVar] = tk.StringVar(value="") if tk else None
         self._toast_label: Optional[ttk.Label] = None
         self._toast_container: Optional[ttk.Frame] = None
         self._toast_after: Optional[str] = None
@@ -769,7 +769,6 @@ class ControlCenterUI:
         self._toast_after = None
         if self._toast_var is not None:
             self._toast_var.set("")
-        self._toast_var = None
         self._toast_label = None
         self._toast_container = None
         self._root = None
