@@ -137,6 +137,11 @@ class ControlCenterUI:
                 pass
 
         self._root = root
+        if tk is not None:
+            try:
+                self._toast_var = tk.StringVar(master=root, value="")
+            except Exception:
+                self._toast_var = None
         root.title("Tools API Control Center")
         root.geometry("1100x760")
         try:
