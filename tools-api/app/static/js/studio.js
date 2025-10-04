@@ -1855,12 +1855,6 @@ async function handleYtDlpDownload(formatId) {
             directLabel: 'Open API download link'
         };
 
-        const directUrl = buildDirectDownloadUrl({ url: payload.url, format: formatId, filename });
-        const directLink = createDownloadLinkFromUrl(directUrl, 'Open API download link');
-        if (directLink) {
-            downloadNodes.push(directLink);
-        }
-
         if (selectedFormat) {
             const downloadMeta = {};
             downloadMeta['Format ID'] = selectedFormat.format_id;
