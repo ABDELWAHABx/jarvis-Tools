@@ -258,43 +258,108 @@
                         <form id="yt-dlp-form" class="tool-form">
                             <div class="form-header">
                                 <h3>yt-dlp Inspector</h3>
-                                <p class="muted">Fetch metadata or trigger a download with safe defaults.</p>
+                                <p class="muted">Preview the media details, then pick a ready-made download recipe.</p>
                             </div>
                             <label for="yt-dlp-url">URL</label>
                             <input id="yt-dlp-url" type="url" required placeholder="https://www.youtube.com/watch?v=..." />
-                            <label for="yt-dlp-format">Format selector (optional)</label>
-                            <input id="yt-dlp-format" type="text" placeholder="bestvideo+bestaudio/best" />
-                            <label for="yt-dlp-playlist-items">Playlist items (e.g. 1-3,5)</label>
-                            <input id="yt-dlp-playlist-items" type="text" placeholder="1-3,5" />
-                            <label class="checkbox">
-                                <input id="yt-dlp-binary" type="checkbox" />
-                                <span>Return binary download</span>
-                            </label>
-                            <label for="yt-dlp-filename">Filename override (binary only)</label>
-                            <input id="yt-dlp-filename" type="text" placeholder="custom.mp4" />
-                            <label for="yt-dlp-headers">HTTP headers (JSON object)</label>
-                            <textarea id="yt-dlp-headers" rows="3" placeholder='{"Cookie": "session=..."}'></textarea>
-                            <label for="yt-dlp-proxy">Proxy URL</label>
-                            <input id="yt-dlp-proxy" type="text" placeholder="socks5://localhost:9050" />
-                            <div class="form-row">
-                                <label class="checkbox">
-                                    <input id="yt-dlp-write-subtitles" type="checkbox" />
-                                    <span>Write subtitles</span>
-                                </label>
-                                <label class="checkbox">
-                                    <input id="yt-dlp-write-auto-sub" type="checkbox" />
-                                    <span>Write automatic subs</span>
-                                </label>
+
+                            <label for="yt-dlp-template">Quick recipe</label>
+                            <select id="yt-dlp-template">
+                                <option value="best">Best quality video</option>
+                                <option value="hd1080">HD 1080p (if available)</option>
+                                <option value="audio">Audio only</option>
+                                <option value="subtitles">Grab subtitles</option>
+                                <option value="custom">Custom setup</option>
+                            </select>
+                            <p id="yt-dlp-template-hint" class="helper-text"></p>
+
+                            <div class="form-actions">
+                                <button type="submit" class="primary-btn">Preview media info</button>
+                                <button type="button" id="yt-dlp-open-modal" class="secondary-btn" disabled>
+                                    Choose download quality
+                                </button>
                             </div>
-                            <label for="yt-dlp-subtitle-langs">Subtitle languages (comma separated)</label>
-                            <input id="yt-dlp-subtitle-langs" type="text" placeholder="en,es" />
-                            <button type="submit" class="primary-btn">Run yt-dlp</button>
+
+                            <details class="advanced-options">
+                                <summary>Advanced options</summary>
+                                <div class="advanced-grid">
+                                    <div>
+                                        <label for="yt-dlp-format">Format selector</label>
+                                        <input
+                                            id="yt-dlp-format"
+                                            type="text"
+                                            placeholder="bestvideo+bestaudio/best"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label for="yt-dlp-playlist-items">Playlist items (e.g. 1-3,5)</label>
+                                        <input id="yt-dlp-playlist-items" type="text" placeholder="1-3,5" />
+                                    </div>
+                                    <div>
+                                        <label for="yt-dlp-filename">Filename override</label>
+                                        <input id="yt-dlp-filename" type="text" placeholder="custom.mp4" />
+                                    </div>
+                                    <div>
+                                        <label for="yt-dlp-headers">HTTP headers (JSON object)</label>
+                                        <textarea
+                                            id="yt-dlp-headers"
+                                            rows="3"
+                                            placeholder='{"Cookie": "session=..."}'
+                                        ></textarea>
+                                    </div>
+                                    <div>
+                                        <label for="yt-dlp-proxy">Proxy URL</label>
+                                        <input id="yt-dlp-proxy" type="text" placeholder="socks5://localhost:9050" />
+                                    </div>
+                                    <div class="form-row">
+                                        <label class="checkbox">
+                                            <input id="yt-dlp-write-subtitles" type="checkbox" />
+                                            <span>Write subtitles to disk</span>
+                                        </label>
+                                        <label class="checkbox">
+                                            <input id="yt-dlp-write-auto-sub" type="checkbox" />
+                                            <span>Write automatic subs</span>
+                                        </label>
+                                    </div>
+                                    <div>
+                                        <label for="yt-dlp-subtitle-langs">Subtitle languages (comma separated)</label>
+                                        <input id="yt-dlp-subtitle-langs" type="text" placeholder="en,es" />
+                                    </div>
+                                </div>
+                            </details>
                         </form>
                     </div>
                     <div id="media-results" class="result-panel span-two" aria-live="polite"></div>
                 </div>
             </section>
         </main>
+    </div>
+    <div id="yt-dlp-modal" class="modal" hidden>
+        <div class="modal__backdrop" data-modal-dismiss></div>
+        <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="yt-dlp-modal-title">
+            <header class="modal__header">
+                <div>
+                    <h3 id="yt-dlp-modal-title">Choose a download quality</h3>
+                    <p id="yt-dlp-modal-subtitle" class="muted"></p>
+                </div>
+                <button type="button" class="icon-btn" id="yt-dlp-modal-close" aria-label="Close">
+                    ×
+                </button>
+            </header>
+            <div class="modal__body">
+                <p class="helper-text">
+                    Select the format that best matches what you need. We organise the list from the highest video quality to
+                    simple audio tracks.
+                </p>
+                <div id="yt-dlp-quality-list" class="quality-list" role="radiogroup" aria-label="Download options"></div>
+            </div>
+            <footer class="modal__footer">
+                <button type="button" class="secondary-btn" data-modal-dismiss>Cancel</button>
+                <button type="button" class="primary-btn" id="yt-dlp-modal-download" disabled>
+                    Download selection
+                </button>
+            </footer>
+        </div>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script>

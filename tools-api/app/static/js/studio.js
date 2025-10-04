@@ -2,6 +2,15 @@ const config = window.__STUDIO_CONFIG__ || {};
 const OPENAPI_URL = config.openapiUrl || '/openapi.json';
 const toastState = { timer: null };
 let endpointCatalogue = null;
+const ytDlpState = {
+    metadata: null,
+    rawResponse: null,
+    formatsById: new Map(),
+    dom: {},
+    lastTemplate: 'best',
+    modalKeyListener: null,
+    selectedFormatId: null
+};
 
 function init() {
     setupNavigation();
@@ -434,75 +443,580 @@ function setupCobaltForm() {
 }
 
 function setupYtDlpForm() {
-    attachSubmit('yt-dlp-form', async (form) => {
-        const urlField = document.getElementById('yt-dlp-url');
-        const formatField = document.getElementById('yt-dlp-format');
-        const binaryToggle = document.getElementById('yt-dlp-binary');
-        const filenameField = document.getElementById('yt-dlp-filename');
-        const playlistItemsField = document.getElementById('yt-dlp-playlist-items');
-        const headersField = document.getElementById('yt-dlp-headers');
-        const proxyField = document.getElementById('yt-dlp-proxy');
-        const writeSubtitlesToggle = document.getElementById('yt-dlp-write-subtitles');
-        const writeAutoSubToggle = document.getElementById('yt-dlp-write-auto-sub');
-        const subtitleLangsField = document.getElementById('yt-dlp-subtitle-langs');
+    const form = document.getElementById('yt-dlp-form');
+    if (!form) {
+        return;
+    }
 
-        const urlValue = urlField.value.trim();
-        if (!urlValue) {
-            throw new Error('Provide a URL to inspect.');
+    const urlField = document.getElementById('yt-dlp-url');
+    const formatField = document.getElementById('yt-dlp-format');
+    const playlistItemsField = document.getElementById('yt-dlp-playlist-items');
+    const filenameField = document.getElementById('yt-dlp-filename');
+    const headersField = document.getElementById('yt-dlp-headers');
+    const proxyField = document.getElementById('yt-dlp-proxy');
+    const writeSubtitlesToggle = document.getElementById('yt-dlp-write-subtitles');
+    const writeAutoSubToggle = document.getElementById('yt-dlp-write-auto-sub');
+    const subtitleLangsField = document.getElementById('yt-dlp-subtitle-langs');
+    const templateSelect = document.getElementById('yt-dlp-template');
+    const templateHint = document.getElementById('yt-dlp-template-hint');
+    const openModalButton = document.getElementById('yt-dlp-open-modal');
+    const modal = document.getElementById('yt-dlp-modal');
+    const modalSubtitle = document.getElementById('yt-dlp-modal-subtitle');
+    const qualityList = document.getElementById('yt-dlp-quality-list');
+    const modalDownloadButton = document.getElementById('yt-dlp-modal-download');
+    const modalCloseButton = document.getElementById('yt-dlp-modal-close');
+
+    ytDlpState.dom = {
+        form,
+        urlField,
+        formatField,
+        playlistItemsField,
+        filenameField,
+        headersField,
+        proxyField,
+        writeSubtitlesToggle,
+        writeAutoSubToggle,
+        subtitleLangsField,
+        templateSelect,
+        templateHint,
+        openModalButton,
+        modal,
+        modalSubtitle,
+        qualityList,
+        modalDownloadButton
+    };
+
+    const templatePresets = {
+        best: {
+            description: 'Ideal when you want the highest quality video with audio.',
+            values: {
+                format: 'bestvideo*+bestaudio/best',
+                writeSubtitles: false,
+                writeAutoSub: false,
+                subtitleLangs: ''
+            }
+        },
+        hd1080: {
+            description: 'Prefer 1080p (or the best available below it) with merged audio.',
+            values: {
+                format: 'bv*[height<=1080]+ba/b[height<=1080]',
+                writeSubtitles: false,
+                writeAutoSub: false
+            }
+        },
+        audio: {
+            description: 'Grab the best available audio track without video.',
+            values: {
+                format: 'bestaudio/best',
+                writeSubtitles: false,
+                writeAutoSub: false
+            }
+        },
+        subtitles: {
+            description: 'Download metadata while preparing subtitle files for offline viewing.',
+            values: {
+                format: 'best',
+                writeSubtitles: true,
+                writeAutoSub: true
+            }
+        },
+        custom: {
+            description: 'Keep full control of every yt-dlp option yourself.'
         }
+    };
 
-        const payload = {
-            url: urlValue,
-            response_format: binaryToggle.checked ? 'binary' : 'json',
-            filename: filenameField.value.trim() || null,
-            options: {
-                noplaylist: true
+    function applyTemplateChoice(id, applyValues = true) {
+        const preset = templatePresets[id] || templatePresets.best;
+        ytDlpState.lastTemplate = id;
+        if (templateHint) {
+            templateHint.textContent = preset.description;
+        }
+        if (!applyValues || !preset.values) {
+            return;
+        }
+        const values = preset.values;
+        if (formatField && Object.prototype.hasOwnProperty.call(values, 'format')) {
+            formatField.value = values.format || '';
+        }
+        if (writeSubtitlesToggle && Object.prototype.hasOwnProperty.call(values, 'writeSubtitles')) {
+            writeSubtitlesToggle.checked = Boolean(values.writeSubtitles);
+        }
+        if (writeAutoSubToggle && Object.prototype.hasOwnProperty.call(values, 'writeAutoSub')) {
+            writeAutoSubToggle.checked = Boolean(values.writeAutoSub);
+        }
+        if (subtitleLangsField && Object.prototype.hasOwnProperty.call(values, 'subtitleLangs')) {
+            subtitleLangsField.value = values.subtitleLangs || '';
+        }
+    }
+
+    if (templateSelect) {
+        templateSelect.addEventListener('change', () => {
+            applyTemplateChoice(templateSelect.value);
+        });
+        if (!templateSelect.value) {
+            templateSelect.value = 'best';
+        }
+        applyTemplateChoice(templateSelect.value, true);
+    }
+
+    if (openModalButton) {
+        openModalButton.disabled = true;
+        openModalButton.addEventListener('click', () => openYtDlpModal());
+    }
+
+    if (modalCloseButton) {
+        modalCloseButton.addEventListener('click', () => closeYtDlpModal());
+    }
+    if (modal) {
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                closeYtDlpModal();
+            }
+        });
+        modal.querySelectorAll('[data-modal-dismiss]').forEach((node) => {
+            node.addEventListener('click', () => closeYtDlpModal());
+        });
+    }
+
+    if (qualityList) {
+        qualityList.addEventListener('change', (event) => {
+            if (event.target && event.target.name === 'yt-dlp-quality') {
+                updateYtDlpQualitySelection(event.target.value);
+            }
+        });
+    }
+
+    if (modalDownloadButton) {
+        modalDownloadButton.addEventListener('click', () => {
+            if (!qualityList) {
+                return;
+            }
+            const selected = qualityList.querySelector('input[name="yt-dlp-quality"]:checked');
+            if (!selected) {
+                showToast('Choose a format to download first.', 'error');
+                return;
+            }
+            handleYtDlpDownload(selected.value);
+        });
+    }
+
+    attachSubmit('yt-dlp-form', async () => {
+        const payload = buildYtDlpPayload('json');
+        const response = await fetch('/media/yt-dlp', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        const result = await parseResponse(response);
+        if (!result || !result.metadata) {
+            throw new Error('yt-dlp did not return any metadata for this URL.');
+        }
+        ytDlpState.metadata = result.metadata;
+        ytDlpState.rawResponse = result;
+        renderYtDlpResults({ metadata: result.metadata, raw: result });
+        setDownloadButtonsState(Array.isArray(result.metadata.formats) && result.metadata.formats.length > 0);
+        showToast('Metadata retrieved successfully.');
+    });
+}
+
+function buildYtDlpPayload(responseFormat, overrides = {}) {
+    const dom = ytDlpState.dom || {};
+    const urlField = dom.urlField;
+    const urlValue = urlField && urlField.value ? urlField.value.trim() : '';
+    if (!urlValue) {
+        throw new Error('Provide a URL to inspect.');
+    }
+
+    const payload = {
+        url: urlValue,
+        response_format: responseFormat,
+        options: {
+            noplaylist: true
+        }
+    };
+
+    if (responseFormat === 'binary' && dom.filenameField && dom.filenameField.value.trim()) {
+        payload.filename = dom.filenameField.value.trim();
+    }
+
+    const formatOverride = overrides.formatOverride;
+    const formatField = dom.formatField;
+    const formatValue =
+        typeof formatOverride === 'string' && formatOverride.trim().length
+            ? formatOverride.trim()
+            : formatField && formatField.value
+                ? formatField.value.trim()
+                : '';
+    if (formatValue) {
+        payload.options.format = formatValue;
+    }
+
+    if (dom.playlistItemsField && dom.playlistItemsField.value.trim()) {
+        payload.options.playlist_items = dom.playlistItemsField.value.trim();
+    }
+
+    if (dom.headersField && dom.headersField.value.trim()) {
+        try {
+            const parsedHeaders = JSON.parse(dom.headersField.value.trim());
+            if (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders)) {
+                throw new Error();
+            }
+            payload.options.http_headers = parsedHeaders;
+        } catch (error) {
+            throw new Error('HTTP headers must be a valid JSON object.');
+        }
+    }
+
+    if (dom.proxyField && dom.proxyField.value.trim()) {
+        payload.options.proxy = dom.proxyField.value.trim();
+    }
+
+    if (dom.writeSubtitlesToggle && dom.writeSubtitlesToggle.checked) {
+        payload.options.writesubtitles = true;
+    }
+
+    if (dom.writeAutoSubToggle && dom.writeAutoSubToggle.checked) {
+        payload.options.writeautomaticsub = true;
+    }
+
+    if (dom.subtitleLangsField && dom.subtitleLangsField.value.trim()) {
+        const languages = dom.subtitleLangsField.value
+            .split(',')
+            .map((item) => item.trim())
+            .filter((item) => item.length);
+        if (languages.length) {
+            payload.options.subtitleslangs = languages;
+        }
+    }
+
+    if (overrides.options && typeof overrides.options === 'object') {
+        payload.options = { ...payload.options, ...overrides.options };
+    }
+
+    return payload;
+}
+
+function renderYtDlpResults({ metadata, raw, download } = {}) {
+    if (!metadata) {
+        setResult('media-results', []);
+        setDownloadButtonsState(false);
+        return;
+    }
+
+    const hasFormats = Array.isArray(metadata.formats) && metadata.formats.length > 0;
+    const groups = [];
+    const summaryNodes = [];
+
+    const summaryMeta = {};
+    if (metadata.title) {
+        summaryMeta.Title = metadata.title;
+    }
+    if (metadata.uploader || metadata.channel) {
+        summaryMeta.Creator = metadata.uploader || metadata.channel;
+    }
+    if (Number.isFinite(metadata.duration)) {
+        const formattedDuration = formatDuration(metadata.duration);
+        if (formattedDuration) {
+            summaryMeta.Duration = formattedDuration;
+        }
+    }
+    if (metadata.view_count != null) {
+        summaryMeta.Views = formatInteger(metadata.view_count);
+    }
+    if (metadata.upload_date) {
+        const uploaded = formatUploadDate(metadata.upload_date);
+        if (uploaded) {
+            summaryMeta.Uploaded = uploaded;
+        }
+    }
+
+    if (Object.keys(summaryMeta).length) {
+        summaryNodes.push(createMetaGrid(summaryMeta));
+    }
+
+    if (metadata.thumbnail) {
+        const thumbnail = document.createElement('img');
+        thumbnail.src = metadata.thumbnail;
+        thumbnail.alt = metadata.title ? `${metadata.title} thumbnail` : 'Media thumbnail';
+        summaryNodes.push(thumbnail);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'yt-dlp-actions';
+    const chooseButton = document.createElement('button');
+    chooseButton.type = 'button';
+    chooseButton.className = 'secondary-btn';
+    chooseButton.textContent = 'Choose download quality';
+    chooseButton.disabled = !hasFormats;
+    chooseButton.addEventListener('click', () => openYtDlpModal());
+    actions.appendChild(chooseButton);
+
+    const helper = document.createElement('p');
+    helper.className = 'helper-text';
+    helper.textContent = hasFormats
+        ? 'Pick a quality to download or try a different recipe from the dropdown above.'
+        : 'No downloadable formats were reported, but raw metadata is available below.';
+    actions.appendChild(helper);
+
+    summaryNodes.push(actions);
+
+    groups.push(createResultGroup('Media overview', summaryNodes));
+
+    if (download && download.length) {
+        groups.push(createResultGroup('Your download', download));
+    }
+
+    const rawPayload = raw && raw.metadata ? raw.metadata : raw;
+    if (rawPayload) {
+        groups.push(createResultGroup('Raw metadata', [createPre(rawPayload)]));
+    }
+
+    const subtitleGroups = buildSubtitleGroups(metadata);
+    if (subtitleGroups.length) {
+        groups.push(...subtitleGroups);
+    }
+
+    setResult('media-results', groups);
+    setDownloadButtonsState(hasFormats);
+}
+
+function setDownloadButtonsState(enabled) {
+    const dom = ytDlpState.dom || {};
+    if (dom.openModalButton) {
+        dom.openModalButton.disabled = !enabled;
+    }
+}
+
+function openYtDlpModal() {
+    const dom = ytDlpState.dom || {};
+    const modal = dom.modal;
+    if (!modal) {
+        return;
+    }
+    if (!ytDlpState.metadata || !Array.isArray(ytDlpState.metadata.formats) || !ytDlpState.metadata.formats.length) {
+        showToast('Fetch media info before choosing a download.', 'error');
+        return;
+    }
+
+    populateYtDlpModal(ytDlpState.metadata.formats);
+
+    if (dom.modalSubtitle) {
+        dom.modalSubtitle.textContent = ytDlpState.metadata.title || '';
+    }
+
+    modal.hidden = false;
+    document.body.classList.add('modal-open');
+
+    const dialog = modal.querySelector('.modal__dialog');
+    if (dialog) {
+        dialog.setAttribute('tabindex', '-1');
+        dialog.focus();
+    }
+
+    if (!ytDlpState.modalKeyListener) {
+        ytDlpState.modalKeyListener = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeYtDlpModal();
             }
         };
+        document.addEventListener('keydown', ytDlpState.modalKeyListener);
+    }
+}
 
-        if (formatField.value.trim()) {
-            payload.options.format = formatField.value.trim();
+function closeYtDlpModal() {
+    const dom = ytDlpState.dom || {};
+    const modal = dom.modal;
+    if (!modal || modal.hidden) {
+        return;
+    }
+    modal.hidden = true;
+    document.body.classList.remove('modal-open');
+    if (ytDlpState.modalKeyListener) {
+        document.removeEventListener('keydown', ytDlpState.modalKeyListener);
+        ytDlpState.modalKeyListener = null;
+    }
+}
+
+function populateYtDlpModal(formats) {
+    const dom = ytDlpState.dom || {};
+    const qualityList = dom.qualityList;
+    const downloadButton = dom.modalDownloadButton;
+    if (!qualityList) {
+        return;
+    }
+
+    qualityList.innerHTML = '';
+    const options = normaliseYtDlpFormats(formats);
+    ytDlpState.formatsById = new Map(options.map((option) => [option.id, option.original]));
+
+    if (!options.length) {
+        const empty = document.createElement('p');
+        empty.className = 'quality-empty';
+        empty.textContent = 'No downloadable formats were reported for this media.';
+        qualityList.appendChild(empty);
+        if (downloadButton) {
+            downloadButton.disabled = true;
+            downloadButton.textContent = downloadButton.dataset.originalLabel || 'Download selection';
+        }
+        return;
+    }
+
+    options.forEach((option, index) => {
+        const label = document.createElement('label');
+        label.className = 'quality-option';
+
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'yt-dlp-quality';
+        radio.value = option.id;
+        radio.checked = index === 0;
+
+        const content = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'quality-title';
+        title.textContent = option.label;
+        content.appendChild(title);
+
+        if (option.meta.length) {
+            const meta = document.createElement('div');
+            meta.className = 'quality-meta';
+            option.meta.forEach((entry) => {
+                const span = document.createElement('span');
+                span.textContent = entry;
+                meta.appendChild(span);
+            });
+            content.appendChild(meta);
         }
 
-        if (playlistItemsField && playlistItemsField.value.trim()) {
-            payload.options.playlist_items = playlistItemsField.value.trim();
+        label.append(radio, content);
+        qualityList.appendChild(label);
+    });
+
+    const firstOption = options[0];
+    if (firstOption) {
+        updateYtDlpQualitySelection(firstOption.id);
+        const firstRadio = qualityList.querySelector('input[name="yt-dlp-quality"]');
+        if (firstRadio) {
+            firstRadio.focus();
+        }
+    }
+}
+
+function normaliseYtDlpFormats(formats) {
+    if (!Array.isArray(formats)) {
+        return [];
+    }
+
+    const seen = new Set();
+
+    const filtered = formats.filter((format) => {
+        if (!format || typeof format !== 'object') {
+            return false;
+        }
+        if (!format.format_id || seen.has(format.format_id)) {
+            return false;
+        }
+        if (!isVideoFormat(format) && !isAudioFormat(format)) {
+            return false;
+        }
+        seen.add(format.format_id);
+        return true;
+    });
+
+    filtered.sort((a, b) => {
+        const aVideo = isVideoFormat(a);
+        const bVideo = isVideoFormat(b);
+        if (aVideo !== bVideo) {
+            return aVideo ? -1 : 1;
         }
 
-        if (headersField && headersField.value.trim()) {
-            try {
-                const parsedHeaders = JSON.parse(headersField.value.trim());
-                if (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders)) {
-                    throw new Error();
-                }
-                payload.options.http_headers = parsedHeaders;
-            } catch (error) {
-                throw new Error('HTTP headers must be a valid JSON object.');
+        if (aVideo && bVideo) {
+            const heightDelta = getFormatHeight(b) - getFormatHeight(a);
+            if (heightDelta !== 0) {
+                return heightDelta;
+            }
+            const fpsDelta = (b.fps || 0) - (a.fps || 0);
+            if (fpsDelta !== 0) {
+                return fpsDelta;
             }
         }
 
-        if (proxyField && proxyField.value.trim()) {
-            payload.options.proxy = proxyField.value.trim();
+        const bitrateDelta = (b.tbr || b.abr || 0) - (a.tbr || a.abr || 0);
+        if (bitrateDelta !== 0) {
+            return bitrateDelta;
         }
 
-        if (writeSubtitlesToggle && writeSubtitlesToggle.checked) {
-            payload.options.writesubtitles = true;
-        }
+        return 0;
+    });
 
-        if (writeAutoSubToggle && writeAutoSubToggle.checked) {
-            payload.options.writeautomaticsub = true;
-        }
+    return filtered.map((format) => ({
+        id: format.format_id,
+        label: buildYtDlpFormatLabel(format),
+        meta: buildYtDlpFormatMeta(format),
+        original: format
+    }));
+}
 
-        if (subtitleLangsField && subtitleLangsField.value.trim()) {
-            const languages = subtitleLangsField
-                .value
-                .split(',')
-                .map((item) => item.trim())
-                .filter((item) => item.length);
-            if (languages.length) {
-                payload.options.subtitleslangs = languages;
-            }
-        }
+function updateYtDlpQualitySelection(formatId) {
+    const dom = ytDlpState.dom || {};
+    const qualityList = dom.qualityList;
+    const downloadButton = dom.modalDownloadButton;
+    if (!qualityList) {
+        return;
+    }
 
+    const radios = qualityList.querySelectorAll('input[name="yt-dlp-quality"]');
+    if (!formatId) {
+        const checked = Array.from(radios).find((input) => input.checked);
+        formatId = checked ? checked.value : null;
+    }
+
+    ytDlpState.selectedFormatId = formatId || null;
+
+    qualityList.querySelectorAll('.quality-option').forEach((option) => {
+        const radio = option.querySelector('input[name="yt-dlp-quality"]');
+        option.classList.toggle('is-selected', Boolean(radio && radio.checked));
+    });
+
+    if (!downloadButton) {
+        return;
+    }
+
+    if (!formatId || !ytDlpState.formatsById.has(formatId)) {
+        downloadButton.disabled = true;
+        downloadButton.textContent = downloadButton.dataset.originalLabel || 'Download selection';
+        return;
+    }
+
+    if (!downloadButton.dataset.originalLabel) {
+        downloadButton.dataset.originalLabel = downloadButton.textContent;
+    }
+
+    downloadButton.disabled = false;
+    downloadButton.textContent = buildYtDlpDownloadLabel(ytDlpState.formatsById.get(formatId));
+}
+
+async function handleYtDlpDownload(formatId) {
+    const dom = ytDlpState.dom || {};
+    const downloadButton = dom.modalDownloadButton;
+    if (!formatId) {
+        return;
+    }
+
+    const originalLabel = downloadButton ? downloadButton.textContent : null;
+    if (downloadButton) {
+        downloadButton.disabled = true;
+        downloadButton.textContent = 'Preparing download…';
+    }
+
+    try {
+        if (!ytDlpState.formatsById.has(formatId)) {
+            throw new Error('Select a valid format to download.');
+        }
+        const payload = buildYtDlpPayload('binary', { formatOverride: formatId });
         const response = await fetch('/media/yt-dlp', {
             method: 'POST',
             headers: {
@@ -511,34 +1025,247 @@ function setupYtDlpForm() {
             body: JSON.stringify(payload)
         });
 
-        if (binaryToggle.checked) {
-            const blob = await parseBinaryResponse(response);
-            const filename = payload.filename || parseFilename(response.headers.get('Content-Disposition')) || 'download.bin';
-            const metadataHeader = response.headers.get('X-YtDlp-Metadata');
-            const metadata = metadataHeader ? safeJsonDecode(atob(metadataHeader)) : null;
+        const blob = await parseBinaryResponse(response);
+        const selectedFormat = ytDlpState.formatsById.get(formatId) || null;
+        const filename =
+            payload.filename ||
+            parseFilename(response.headers.get('Content-Disposition')) ||
+            buildFilenameFromMetadata(ytDlpState.metadata, selectedFormat);
 
-            const download = createDownloadLinkFromBlob(blob, filename, 'Download Media');
-            const groups = [createResultGroup('Downloaded Media', [download])];
-            if (metadata) {
-                groups.push(createResultGroup('Metadata', [createPre(metadata)]));
-                const subtitleGroups = buildSubtitleGroups(metadata);
-                if (subtitleGroups.length) {
-                    groups.push(...subtitleGroups);
-                }
+        const downloadLink = createDownloadLinkFromBlob(blob, filename, 'Download media');
+        const downloadNodes = [downloadLink];
+
+        if (selectedFormat) {
+            const downloadMeta = {};
+            downloadMeta['Format ID'] = selectedFormat.format_id;
+            if (selectedFormat.ext) {
+                downloadMeta.Container = `.${selectedFormat.ext}`;
             }
-            setResult('media-results', groups);
-            showToast('Media download ready.');
-        } else {
-            const result = await parseResponse(response);
-            const groups = [createResultGroup('yt-dlp Metadata', [createPre(result.metadata)])];
-            const subtitleGroups = buildSubtitleGroups(result.metadata);
-            if (subtitleGroups.length) {
-                groups.push(...subtitleGroups);
+            const qualityLabel = buildYtDlpFormatLabel(selectedFormat);
+            if (qualityLabel) {
+                downloadMeta.Quality = qualityLabel;
             }
-            setResult('media-results', groups);
-            showToast('Metadata retrieved successfully.');
+            const reportedSize = selectedFormat.filesize || selectedFormat.filesize_approx;
+            if (reportedSize) {
+                downloadMeta['Reported size'] = formatBytes(reportedSize) || `${reportedSize} bytes`;
+            }
+            downloadNodes.push(createMetaGrid(downloadMeta));
         }
+
+        closeYtDlpModal();
+        renderYtDlpResults({ metadata: ytDlpState.metadata, raw: ytDlpState.rawResponse, download: downloadNodes });
+        showToast('Media download ready.');
+    } catch (error) {
+        console.error(error);
+        showToast(error.message || 'Download failed', 'error');
+        return;
+    } finally {
+        if (downloadButton) {
+            const fallback = downloadButton.dataset.originalLabel || originalLabel || 'Download selection';
+            downloadButton.textContent = fallback;
+            downloadButton.disabled = false;
+        }
+    }
+}
+
+function buildYtDlpFormatLabel(format) {
+    if (!format) {
+        return '';
+    }
+    const hasVideo = isVideoFormat(format);
+    const hasAudio = isAudioFormat(format);
+    const ext = format.ext ? `.${format.ext}` : '';
+
+    if (hasVideo) {
+        const height = getFormatHeight(format);
+        const fps = format.fps ? `${Math.round(format.fps)}fps` : '';
+        const resolution = height ? `${height}p` : format.format_note || 'Video';
+        const descriptor = hasAudio ? 'video + audio' : 'video';
+        const parts = [resolution];
+        if (fps) {
+            parts.push(fps);
+        }
+        parts.push(descriptor);
+        if (ext) {
+            parts.push(ext);
+        }
+        return parts.join(' ');
+    }
+
+    if (hasAudio) {
+        const bitrate = format.abr || format.tbr;
+        const parts = ['Audio'];
+        if (bitrate) {
+            parts.push(`${Math.round(bitrate)}kbps`);
+        }
+        if (ext) {
+            parts.push(ext);
+        }
+        return parts.join(' ');
+    }
+
+    return format.format || format.format_id || 'Unknown format';
+}
+
+function buildYtDlpFormatMeta(format) {
+    const entries = [];
+    const seen = new Set();
+
+    const height = getFormatHeight(format);
+    if (height) {
+        const resolutionLabel = format.width && format.height ? `${format.width}×${format.height}` : `${height}p`;
+        entries.push(resolutionLabel);
+    }
+
+    if (format.fps) {
+        entries.push(`${Math.round(format.fps)} fps`);
+    }
+
+    if (format.format_note) {
+        entries.push(format.format_note);
+    }
+
+    if (format.ext) {
+        entries.push(`.${format.ext}`);
+    }
+
+    if (isVideoFormat(format) && format.vcodec && format.vcodec !== 'none') {
+        entries.push(format.vcodec);
+    }
+
+    if (isAudioFormat(format) && format.acodec && format.acodec !== 'none') {
+        entries.push(format.acodec);
+    }
+
+    if (isAudioFormat(format)) {
+        const bitrate = format.abr || format.tbr;
+        if (bitrate) {
+            entries.push(`${Math.round(bitrate)} kbps`);
+        }
+        if (format.asr) {
+            entries.push(`${format.asr} Hz`);
+        }
+    }
+
+    const size = format.filesize || format.filesize_approx;
+    if (size) {
+        entries.push(formatBytes(size) || `${size} bytes`);
+    }
+
+    entries.push(`Format ${format.format_id}`);
+
+    return entries.filter((entry) => {
+        if (!entry || seen.has(entry)) {
+            return false;
+        }
+        seen.add(entry);
+        return true;
     });
+}
+
+function buildYtDlpDownloadLabel(format) {
+    if (!format) {
+        return 'Download selection';
+    }
+    const parts = [];
+    if (isVideoFormat(format) && getFormatHeight(format)) {
+        parts.push(`${getFormatHeight(format)}p`);
+    } else if (!isVideoFormat(format) && isAudioFormat(format)) {
+        parts.push('audio');
+    }
+    if (format.ext) {
+        parts.push(`.${format.ext}`);
+    }
+    if (!parts.length) {
+        return 'Download selection';
+    }
+    return `Download ${parts.join(' ')}`;
+}
+
+function buildFilenameFromMetadata(metadata, format) {
+    const ext = format && format.ext ? `.${format.ext}` : '.bin';
+    const title = metadata && metadata.title ? metadata.title : 'download';
+    const slug = title
+        .toString()
+        .trim()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-zA-Z0-9-_]/g, '')
+        .replace(/-{2,}/g, '-')
+        .replace(/^-+|-+$/g, '');
+    const safeTitle = slug || 'download';
+    return safeTitle.endsWith(ext) ? safeTitle : `${safeTitle}${ext}`;
+}
+
+function getFormatHeight(format) {
+    if (!format) {
+        return 0;
+    }
+    if (typeof format.height === 'number') {
+        return format.height;
+    }
+    if (typeof format.height === 'string' && format.height.trim()) {
+        const parsed = Number.parseInt(format.height, 10);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    const candidates = [format.resolution, format.format_note];
+    for (const candidate of candidates) {
+        if (typeof candidate !== 'string') {
+            continue;
+        }
+        const match = candidate.match(/(\d{3,4})p/i);
+        if (match) {
+            const value = Number.parseInt(match[1], 10);
+            if (Number.isFinite(value)) {
+                return value;
+            }
+        }
+    }
+    return 0;
+}
+
+function isVideoFormat(format) {
+    return Boolean(format && format.vcodec && format.vcodec !== 'none');
+}
+
+function isAudioFormat(format) {
+    return Boolean(format && format.acodec && format.acodec !== 'none');
+}
+
+function formatDuration(totalSeconds) {
+    if (!Number.isFinite(totalSeconds)) {
+        return null;
+    }
+    const seconds = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hours) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatUploadDate(value) {
+    if (typeof value !== 'string' || value.length !== 8) {
+        return null;
+    }
+    const year = value.slice(0, 4);
+    const month = value.slice(4, 6);
+    const day = value.slice(6, 8);
+    if (!year || !month || !day) {
+        return null;
+    }
+    return `${year}-${month}-${day}`;
+}
+
+function formatInteger(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+        return String(value);
+    }
+    return number.toLocaleString();
 }
 
 function attachSubmit(formId, handler) {
