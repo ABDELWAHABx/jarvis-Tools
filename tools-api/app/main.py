@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from app.routers import docx, gdocs_parser, js_tools, media, parser
+from app.routers import docx, gdocs_parser, image_tools, js_tools, media, parser
 from app.extensions import local_queue_extension
 from app.utils.logger import logger
 from app.config import settings
@@ -50,6 +50,7 @@ app.include_router(docx.router)  # Already has /docx prefix
 app.include_router(gdocs_parser.router)
 app.include_router(js_tools.router)
 app.include_router(media.router)
+app.include_router(image_tools.router)
 local_queue_extension.register(app)
 
 

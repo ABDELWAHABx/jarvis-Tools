@@ -164,9 +164,78 @@
               "error": "string – Present when status=failed."
             }
           }
+    }
+  ]
+},
+{
+  "name": "Image Effects",
+  "summary": "Expose the Before & After swipe generator and Halations glow filter via REST APIs.",
+  "docs_url": "http://localhost:8000/docs#/image-tools",
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/image-tools/before-after",
+      "headline": "Before ↔ After Animation",
+      "tagline": "Create looping swipe videos from two images – straight from your automations.",
+      "description": "Uploads two images and returns a base64 MP4 (or binary stream) with a sliding divider that mimics the FUT-Coding before-and-after tool.",
+      "request": {
+        "content_type": "multipart/form-data",
+        "fields": {
+          "before_image": "file – Image showing the 'before' state.",
+          "after_image": "file – Image showing the 'after' state.",
+          "frame_width": "int (optional) – Override output width.",
+          "frame_height": "int (optional) – Override output height.",
+          "duration_seconds": "float (optional) – Clip duration (default 6s).",
+          "fps": "int (optional) – Frame rate (default 30).",
+          "cycles": "int (optional) – Number of divider passes (default 2).",
+          "line_thickness": "int (optional) – Divider thickness (default 6px).",
+          "add_text": "bool (optional) – Enable overlay text.",
+          "overlay_text": "string (optional) – Text content rendered when add_text is true.",
+          "response_format": "query: json|binary – Choose JSON (base64) or MP4 stream."
+        },
+        "notes": [
+          "When no optional parameters are supplied the API responds with a hint explaining customisation options."
+        ]
+      },
+      "response": {
+        "content_type": "application/json",
+        "fields": {
+          "video_base64": "string – Base64 encoded MP4 clip.",
+          "metadata": "object – Echoes dimensions, fps, duration, etc.",
+          "message": "string – Optional hint about available parameters."
         }
-      ]
+      }
     },
+    {
+      "method": "POST",
+      "path": "/image-tools/halations",
+      "headline": "Halations Glow",
+      "tagline": "Wrap the FUT-Coding halations image filter inside Tools API.",
+      "description": "Applies a brightness-driven glow effect inspired by the halations open-source project.",
+      "request": {
+        "content_type": "multipart/form-data",
+        "fields": {
+          "image": "file – Source image.",
+          "blur_amount": "float (optional) – Blur radius for the glow mask (default 10).",
+          "brightness_threshold": "int (optional) – Highlight threshold (default 200).",
+          "strength": "float (optional) – Intensity of the overlay (default 50).",
+          "response_format": "query: json|binary – Choose JSON (base64) or JPEG stream."
+        },
+        "notes": [
+          "Default requests include a hint about tweaking blur_amount, brightness_threshold, and strength."
+        ]
+      },
+      "response": {
+        "content_type": "application/json",
+        "fields": {
+          "image_base64": "string – Base64 encoded JPEG with glow applied.",
+          "metadata": "object – Echoes dimensions and parameter values.",
+          "message": "string – Optional hint about available parameters."
+        }
+      }
+    }
+  ]
+},
     {
       "name": "Google Docs JSON Parser",
       "summary": "Pull plain text, links, and image references out of Google Docs JSON exports for downstream automations.",
