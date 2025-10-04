@@ -32,12 +32,17 @@ def test_before_after_default_message():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["content_type"] == "video/mp4"
+    assert payload["content_type"] in {"video/mp4", "image/gif"}
     assert payload["message"] is not None
 
     video_bytes = base64.b64decode(payload["video_base64"])
-    # Minimal assurance that we produced an MP4 container.
-    assert video_bytes[4:8] == b"ftyp"
+    if payload["content_type"] == "video/mp4":
+        # Minimal assurance that we produced an MP4 container.
+        assert video_bytes[4:8] == b"ftyp"
+    else:
+        assert video_bytes.startswith(b"GIF8")
+    assert payload["metadata"].get("encoder") in {"ffmpeg", "gif"}
+    assert payload["metadata"].get("container") in {"mp4", "gif"}
 
 
 def test_before_after_binary_headers():
@@ -61,7 +66,7 @@ def test_before_after_binary_headers():
     )
 
     assert response.status_code == 200
-    assert response.headers["content-type"] == "video/mp4"
+    assert response.headers["content-type"] in {"video/mp4", "image/gif"}
     assert "X-Before-After-Metadata" in response.headers
     # Custom parameters suppress the hint header.
     assert "X-Before-After-Hint" not in response.headers

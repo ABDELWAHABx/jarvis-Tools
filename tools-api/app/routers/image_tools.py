@@ -18,7 +18,7 @@ router = APIRouter(prefix="/image-tools", tags=["image-tools"])
 
 
 class BeforeAfterResponse(BaseModel):
-    video_base64: str = Field(..., description="Base64 encoded MP4 animation.")
+    video_base64: str = Field(..., description="Base64 encoded animation clip (MP4 or GIF).")
     filename: str
     content_type: str
     metadata: dict
@@ -43,6 +43,7 @@ class HalationsResponse(BaseModel):
         200: {
             "content": {
                 "video/mp4": {"schema": {"type": "string", "format": "binary"}},
+                "image/gif": {"schema": {"type": "string", "format": "binary"}},
             }
         }
     },
@@ -66,7 +67,7 @@ async def before_after_endpoint(
     overlay_text: str | None = Form(None, description="Text to render when add_text is true."),
     response_format: Literal["json", "binary"] = Query(
         "json",
-        description="Return JSON with base64 video (default) or binary MP4 stream.",
+        description="Return JSON with base64 animation (default) or binary stream.",
     ),
 ):
     """Generate a before/after swipe animation."""
