@@ -1327,16 +1327,38 @@ function setupYtDlpForm() {
     });
 }
 
+function normaliseMediaUrl(raw) {
+    if (typeof raw !== 'string') {
+        return '';
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return '';
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (trimmed.startsWith('//')) {
+        return `https:${trimmed}`;
+    }
+    return `https://${trimmed}`;
+}
+
 function buildYtDlpPayload(responseFormat, overrides = {}) {
     const dom = ytDlpState.dom || {};
     const urlField = dom.urlField;
-    const urlValue = urlField && urlField.value ? urlField.value.trim() : '';
-    if (!urlValue) {
+    const inputValue = urlField && urlField.value ? urlField.value : '';
+    const normalisedUrl = normaliseMediaUrl(inputValue);
+    if (!normalisedUrl) {
         throw new Error('Provide a URL to inspect.');
     }
 
+    if (urlField && urlField.value !== normalisedUrl) {
+        urlField.value = normalisedUrl;
+    }
+
     const payload = {
-        url: urlValue,
+        url: normalisedUrl,
         response_format: responseFormat,
         options: {
             noplaylist: true

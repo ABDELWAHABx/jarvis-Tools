@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, Literal
 from urllib.parse import quote, urlencode
 
@@ -12,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from pydantic import AnyHttpUrl, BaseModel, Field, constr
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, constr, field_validator
 
 from app.services.progress_manager import progress_manager
 from app.services.yt_dlp_service import DownloadResult, YtDlpServiceError, yt_dlp_service
@@ -48,6 +49,8 @@ SHORTCUT_PRESETS: Dict[YtDlpShortcut, Dict[str, Any]] = {
 class YtDlpOptions(BaseModel):
     """Subset of yt-dlp options exposed through the API."""
 
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     format: str | None = Field(
         default=None, description="yt-dlp format selector, for example 'bestvideo+bestaudio/best'."
     )
@@ -74,6 +77,45 @@ class YtDlpOptions(BaseModel):
         description="List of subtitle language codes to prioritise (yt-dlp subtitleslangs option).",
     )
 
+    @field_validator("playlist_items", "proxy", mode="before")
+    @classmethod
+    def _normalise_optional_strings(cls, value: Any):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+        return value
+
+    @field_validator("http_headers", mode="before")
+    @classmethod
+    def _ensure_http_headers_dict(cls, value: Any):
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValueError("http_headers must be a JSON object") from exc
+            if not isinstance(parsed, dict):
+                raise ValueError("http_headers must be a JSON object")
+            return parsed
+        raise ValueError("http_headers must be a mapping of header names to values")
+
+    @field_validator("subtitleslangs", mode="before")
+    @classmethod
+    def _parse_subtitle_languages(cls, value: Any):
+        if value is None:
+            return None
+        if isinstance(value, list):
+            cleaned = [str(item).strip() for item in value if str(item).strip()]
+            return cleaned or None
+        if isinstance(value, str):
+            languages = [item.strip() for item in value.split(",") if item.strip()]
+            return languages or None
+        raise ValueError("subtitleslangs must be a list of language codes or a comma separated string")
+
     def to_yt_dlp_kwargs(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
         if self.format:
@@ -95,6 +137,8 @@ class YtDlpOptions(BaseModel):
 
 
 class YtDlpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     url: AnyHttpUrl = Field(..., description="URL understood by yt-dlp.")
     response_format: Literal["json", "binary"] = Field(
         default="json",
@@ -109,6 +153,36 @@ class YtDlpRequest(BaseModel):
         default=None,
         description="Client-supplied identifier used to stream progress updates via server-sent events.",
     )
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def _normalise_url(cls, value: Any):
+        if isinstance(value, str):
+            trimmed = value.strip()
+            if not trimmed:
+                return trimmed
+            if trimmed.startswith(("http://", "https://")):
+                return trimmed
+            if trimmed.startswith("//"):
+                return f"https:{trimmed}"
+            if "://" not in trimmed:
+                return f"https://{trimmed}"
+        return value
+
+    @field_validator("filename", mode="before")
+    @classmethod
+    def _sanitise_filename(cls, value: Any):
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("filename must be a string")
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        safe_name = Path(trimmed).name
+        if not safe_name:
+            raise ValueError("filename must contain a valid file name")
+        return safe_name
 
 
 class YtDlpMetadataResponse(BaseModel):
