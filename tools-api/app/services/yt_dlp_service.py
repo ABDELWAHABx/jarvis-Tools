@@ -7,7 +7,7 @@ import mimetypes
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 from app.utils.logger import logger
 
@@ -79,18 +79,50 @@ class YtDlpService:
 
         return info
 
-    def download(self, url: str, *, options: Dict[str, Any], filename_override: str | None = None) -> DownloadResult:
+    def download(
+        self,
+        url: str,
+        *,
+        options: Dict[str, Any],
+        filename_override: str | None = None,
+        progress_callback: Callable[[Dict[str, Any]], None] | None = None,
+    ) -> DownloadResult:
         """Download the media payload and return the bytes plus metadata."""
 
         yt_dlp = _ensure_yt_dlp()
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
-            merged_options = self._build_options({
-                "skip_download": False,
-                "outtmpl": str(tmp_path / "%(title)s.%(ext)s"),
-                **options,
-            })
+            hook_wrappers = []
+            requested_options = dict(options)
+            existing_hooks = requested_options.pop("progress_hooks", None)
+            if existing_hooks:
+                if isinstance(existing_hooks, list):
+                    hook_wrappers.extend(existing_hooks)
+                else:
+                    hook_wrappers.append(existing_hooks)
+
+            if progress_callback is not None:
+
+                def _hook(progress_dict: Dict[str, Any]) -> None:
+                    payload = self._normalise_progress_payload(progress_dict)
+                    if payload is None:
+                        return
+                    try:
+                        progress_callback(payload)
+                    except Exception:  # pragma: no cover - defensive logging
+                        logger.exception("Progress callback failed")
+
+                hook_wrappers.append(_hook)
+
+            merged_options = self._build_options(
+                {
+                    "skip_download": False,
+                    "outtmpl": str(tmp_path / "%(title)s.%(ext)s"),
+                    **requested_options,
+                    "progress_hooks": hook_wrappers if hook_wrappers else None,
+                }
+            )
 
             logger.debug("Downloading media via yt-dlp for %s with options %s", url, merged_options)
             try:
@@ -117,6 +149,56 @@ class YtDlpService:
             metadata = self._serializable_metadata(info)
 
             return DownloadResult(content=content, filename=filename, content_type=content_type, metadata=metadata)
+
+    def _normalise_progress_payload(self, payload: Dict[str, Any]) -> Dict[str, Any] | None:
+        """Convert yt-dlp progress dictionaries into JSON serialisable summaries."""
+
+        if not isinstance(payload, dict):
+            return None
+
+        status = payload.get("status")
+        data: Dict[str, Any] = {"type": "progress"}
+
+        if status == "downloading":
+            downloaded = payload.get("downloaded_bytes") or 0
+            total = payload.get("total_bytes") or payload.get("total_bytes_estimate")
+            data.update(
+                {
+                    "stage": "downloading",
+                    "downloaded_bytes": int(downloaded) if downloaded is not None else 0,
+                }
+            )
+            if total:
+                data["total_bytes"] = int(total)
+            speed = payload.get("speed")
+            if speed is not None:
+                data["speed"] = float(speed)
+            eta = payload.get("eta")
+            if eta is not None:
+                data["eta"] = int(eta)
+            fragments = payload.get("fragment_count")
+            if fragments is not None:
+                data["fragment_count"] = int(fragments)
+        elif status == "finished":
+            data.update({"stage": "finished", "message": "Download complete"})
+            filename = payload.get("filename")
+            if filename:
+                data["filename"] = str(filename)
+        elif status:
+            data["stage"] = str(status)
+        else:
+            data["stage"] = "info"
+
+        info_dict = payload.get("info_dict")
+        if isinstance(info_dict, dict):
+            title = info_dict.get("title")
+            if title:
+                data.setdefault("title", str(title))
+            inferred_filename = info_dict.get("_filename") or info_dict.get("filename")
+            if inferred_filename:
+                data.setdefault("filename", str(inferred_filename))
+
+        return data
 
     def _resolve_download_path(self, info: Dict[str, Any]) -> str | None:
         """Find the best guess at the downloaded file path from a yt-dlp info dict."""
