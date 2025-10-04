@@ -106,11 +106,12 @@ class BeforeAfterService:
                 codec="libx264",
                 quality=8,
                 macro_block_size=None,
+                format="FFMPEG",
             ) as writer:
                 for array in np_frames:
                     writer.append_data(array)
             content = Path(temp_file.name).read_bytes()
-        except (RuntimeError, ValueError, OSError) as exc:  # pragma: no cover - depends on ffmpeg availability
+        except (RuntimeError, ValueError, OSError, TypeError) as exc:  # pragma: no cover - depends on ffmpeg availability
             raise BeforeAfterError("Failed to encode animation with ffmpeg") from exc
         finally:
             try:
