@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import base64
 import json
+from enum import Enum
 from typing import Any, Dict, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
@@ -14,6 +15,30 @@ from app.services.yt_dlp_service import DownloadResult, YtDlpServiceError, yt_dl
 from app.utils.logger import logger
 
 router = APIRouter(prefix="/media", tags=["media-tools"])
+
+
+class YtDlpShortcut(str, Enum):
+    """Predefined yt-dlp recipes exposed as quick API endpoints."""
+
+    best = "best"
+    fhd = "fhd"
+    audio = "audio"
+
+
+SHORTCUT_PRESETS: Dict[YtDlpShortcut, Dict[str, Any]] = {
+    YtDlpShortcut.best: {
+        "description": "Best available video with audio merged.",
+        "options": {"format": "bestvideo*+bestaudio/best", "noplaylist": True},
+    },
+    YtDlpShortcut.fhd: {
+        "description": "1080p video when available, falling back to the closest match.",
+        "options": {"format": "bv*[height<=1080]+ba/b[height<=1080]", "noplaylist": True},
+    },
+    YtDlpShortcut.audio: {
+        "description": "Audio-only download using the best available track.",
+        "options": {"format": "bestaudio/best", "noplaylist": True},
+    },
+}
 
 
 class YtDlpOptions(BaseModel):
@@ -80,6 +105,10 @@ class YtDlpRequest(BaseModel):
 
 class YtDlpMetadataResponse(BaseModel):
     metadata: Dict[str, Any]
+    shortcuts: Dict[str, str] | None = Field(
+        default=None,
+        description="Quick download URLs for common video/audio recipes.",
+    )
 
 
 def _content_disposition(filename: str) -> str:
@@ -90,6 +119,16 @@ def _content_disposition(filename: str) -> str:
 def _metadata_header(metadata: Dict[str, Any]) -> str:
     json_payload = json.dumps(jsonable_encoder(metadata), ensure_ascii=False)
     return base64.b64encode(json_payload.encode("utf-8")).decode("utf-8")
+
+
+def _shortcut_links(url: str) -> Dict[str, str]:
+    links: Dict[str, str] = {}
+    for preset in YtDlpShortcut:
+        if preset not in SHORTCUT_PRESETS:
+            continue
+        path = router.url_path_for("yt_dlp_quick_download", preset=preset.value)
+        links[preset.value] = f"{path}?{urlencode({'url': url})}"
+    return links
 
 
 @router.post("/yt-dlp", response_model=YtDlpMetadataResponse)
@@ -113,10 +152,61 @@ async def yt_dlp_endpoint(request: YtDlpRequest):
             return _BinaryResponse(download, headers)
 
         metadata = yt_dlp_service.extract_info(url, options=options)
-        return YtDlpMetadataResponse(metadata=jsonable_encoder(metadata))
+        shortcuts = _shortcut_links(url)
+        return YtDlpMetadataResponse(metadata=jsonable_encoder(metadata), shortcuts=shortcuts)
     except YtDlpServiceError as exc:
         logger.error("yt-dlp request failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/yt-dlp/quick/{preset}")
+async def yt_dlp_quick_download(preset: YtDlpShortcut, url: AnyHttpUrl, filename: str | None = None):
+    """Download media using a predefined shortcut recipe."""
+
+    config = SHORTCUT_PRESETS.get(preset)
+    if not config:
+        raise HTTPException(status_code=404, detail="Unknown yt-dlp shortcut preset.")
+
+    options = dict(config.get("options", {}))
+
+    try:
+        download: DownloadResult = yt_dlp_service.download(
+            str(url),
+            options=options,
+            filename_override=filename,
+        )
+    except YtDlpServiceError as exc:
+        logger.error("yt-dlp quick preset %s failed: %s", preset.value, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    headers = {
+        "Content-Disposition": _content_disposition(download.filename),
+        "X-YtDlp-Metadata": _metadata_header(download.metadata),
+    }
+    return _BinaryResponse(download, headers)
+
+
+@router.get("/yt-dlp/direct")
+async def yt_dlp_direct_download(url: AnyHttpUrl, format: str, filename: str | None = None):
+    """Download media by specifying a yt-dlp format selector directly via query string."""
+
+    options = {"format": format, "noplaylist": True}
+
+    try:
+        download: DownloadResult = yt_dlp_service.download(
+            str(url),
+            options=options,
+            filename_override=filename,
+        )
+    except YtDlpServiceError as exc:
+        logger.error("yt-dlp direct download failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    headers = {
+        "Content-Disposition": _content_disposition(download.filename),
+        "X-YtDlp-Metadata": _metadata_header(download.metadata),
+    }
+    return _BinaryResponse(download, headers)
 
 
 def _BinaryResponse(result: DownloadResult, headers: Dict[str, str]):
