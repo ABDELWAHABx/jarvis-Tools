@@ -39,6 +39,8 @@ class BeforeAfterService:
     function so the clip loops seamlessly.
     """
 
+    _ffmpeg_support: bool | None = None
+
     def __init__(
         self,
         *,
