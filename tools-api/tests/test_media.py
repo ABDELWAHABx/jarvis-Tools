@@ -105,3 +105,71 @@ def test_yt_dlp_failure_returns_error(client, monkeypatch):
     assert response.status_code == 502
     assert response.json()["detail"] == "boom"
 
+
+def test_yt_dlp_accepts_urls_without_scheme(client, monkeypatch):
+    captured: dict[str, str] = {}
+
+    def fake_extract(url: str, *, options):
+        captured["url"] = url
+        return {"id": "demo"}
+
+    monkeypatch.setattr(media_router.yt_dlp_service, "extract_info", fake_extract)
+
+    response = client.post(
+        "/media/yt-dlp",
+        json={"url": "youtube.com/watch?v=123"},
+    )
+
+    assert response.status_code == 200
+    assert captured["url"] == "https://youtube.com/watch?v=123"
+
+
+def test_yt_dlp_sanitises_filename_override(client, monkeypatch):
+    captured: dict[str, str | None] = {}
+
+    def fake_download(url: str, *, options, filename_override=None):
+        captured["filename"] = filename_override
+        return DownloadResult(
+            content=b"bytes",
+            filename="video.mp4",
+            content_type="video/mp4",
+            metadata={"id": "demo"},
+        )
+
+    monkeypatch.setattr(media_router.yt_dlp_service, "download", fake_download)
+
+    response = client.post(
+        "/media/yt-dlp",
+        json={
+            "url": "https://example.com/video",
+            "response_format": "binary",
+            "filename": "../custom/video.mp4",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["filename"] == "video.mp4"
+
+
+def test_yt_dlp_subtitle_languages_accepts_string(client, monkeypatch):
+    captured_options: dict[str, object] = {}
+
+    def fake_extract(url: str, *, options):
+        captured_options.update(options)
+        return {"id": "demo"}
+
+    monkeypatch.setattr(media_router.yt_dlp_service, "extract_info", fake_extract)
+
+    response = client.post(
+        "/media/yt-dlp",
+        json={
+            "url": "https://example.com/video",
+            "options": {
+                "subtitleslangs": "en, es ,",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured_options["subtitleslangs"] == ["en", "es"]
+
