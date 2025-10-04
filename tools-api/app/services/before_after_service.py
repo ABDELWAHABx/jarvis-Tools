@@ -6,11 +6,13 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Tuple, Callable, List
 
 import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+from app.utils.logger import logger
 
 
 class BeforeAfterError(RuntimeError):
@@ -96,6 +98,55 @@ class BeforeAfterService:
         # imageio uses numpy arrays, so convert the PIL frames.
         np_frames = [np.asarray(frame) for frame in frames]
 
+        try:
+            content, content_type, extension, encoder = self._encode_animation(np_frames)
+        except BeforeAfterError:
+            raise
+
+        filename = f"before-after-{uuid.uuid4().hex[:8]}.{extension}"
+        return BeforeAfterResult(
+            content=content,
+            content_type=content_type,
+            filename=filename,
+            metadata={**metadata, "encoder": encoder, "container": extension},
+        )
+
+    def _encode_animation(
+        self, frames: List[np.ndarray]
+    ) -> Tuple[bytes, str, str, str]:
+        """Encode the generated frames using the best available backend."""
+
+        encoders: List[Callable[[List[np.ndarray]], Tuple[bytes, str, str, str]]] = [
+            self._encode_with_ffmpeg,
+            self._encode_with_gif,
+        ]
+
+        last_error: Exception | None = None
+        for encoder in encoders:
+            try:
+                return encoder(frames)
+            except BeforeAfterError as exc:
+                last_error = exc
+                logger.warning("Before/after encoder %s unavailable: %s", encoder.__name__, exc)
+
+        if last_error is None:
+            raise BeforeAfterError("No encoders were configured for the before/after service")
+        raise BeforeAfterError(
+            "Failed to encode animation using the available backends."
+        ) from last_error
+
+    def _encode_with_ffmpeg(
+        self, frames: List[np.ndarray]
+    ) -> Tuple[bytes, str, str, str]:  # pragma: no cover - depends on ffmpeg availability
+        """Try to encode the animation as an H.264 MP4 using imageio-ffmpeg."""
+
+        try:
+            import imageio_ffmpeg  # noqa: F401
+        except ImportError as exc:
+            raise BeforeAfterError(
+                "imageio-ffmpeg is not installed; cannot encode MP4 animation"
+            ) from exc
+
         temp_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
         temp_file.close()
 
@@ -108,10 +159,10 @@ class BeforeAfterService:
                 macro_block_size=None,
                 format="FFMPEG",
             ) as writer:
-                for array in np_frames:
+                for array in frames:
                     writer.append_data(array)
             content = Path(temp_file.name).read_bytes()
-        except (RuntimeError, ValueError, OSError, TypeError) as exc:  # pragma: no cover - depends on ffmpeg availability
+        except (RuntimeError, ValueError, OSError, TypeError) as exc:
             raise BeforeAfterError("Failed to encode animation with ffmpeg") from exc
         finally:
             try:
@@ -119,13 +170,33 @@ class BeforeAfterService:
             except OSError:
                 pass
 
-        filename = f"before-after-{uuid.uuid4().hex[:8]}.mp4"
-        return BeforeAfterResult(
-            content=content,
-            content_type="video/mp4",
-            filename=filename,
-            metadata=metadata,
-        )
+        return content, "video/mp4", "mp4", "ffmpeg"
+
+    def _encode_with_gif(self, frames: List[np.ndarray]) -> Tuple[bytes, str, str, str]:
+        """Fallback encoder that produces an animated GIF."""
+
+        frame_duration = 1.0 / float(self.fps)
+        temp_file = tempfile.NamedTemporaryFile(suffix=".gif", delete=False)
+        temp_file.close()
+
+        try:
+            imageio.mimsave(
+                temp_file.name,
+                frames,
+                format="GIF",
+                duration=frame_duration,
+                loop=0,
+            )
+            content = Path(temp_file.name).read_bytes()
+        except (RuntimeError, ValueError, OSError, TypeError) as exc:
+            raise BeforeAfterError("Failed to encode animation as GIF") from exc
+        finally:
+            try:
+                Path(temp_file.name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        return content, "image/gif", "gif", "gif"
 
     def _build_frames(self, before: Image.Image, after: Image.Image) -> Iterable[Image.Image]:
         total_frames = max(2, int(self.fps * self.duration_seconds))
