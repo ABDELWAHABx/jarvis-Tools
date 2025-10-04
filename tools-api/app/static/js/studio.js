@@ -11,7 +11,7 @@ const ytDlpState = {
     modalKeyListener: null,
     selectedFormatId: null,
     subtitleLanguageFilter: 'en',
-    downloadNodes: null,
+    downloadState: null,
     downloadProgress: null,
     downloadProgressTimer: null
 };
@@ -1272,7 +1272,7 @@ function renderYtDlpResults(args = {}) {
     if (!metadata) {
         ytDlpState.metadata = null;
         ytDlpState.rawResponse = null;
-        ytDlpState.downloadNodes = null;
+        ytDlpState.downloadState = null;
         setResult('media-results', []);
         setDownloadButtonsState(false);
         return;
@@ -1287,12 +1287,12 @@ function renderYtDlpResults(args = {}) {
     }
 
     if (download !== undefined) {
-        ytDlpState.downloadNodes = download;
+        ytDlpState.downloadState = download;
     } else if (isNewMetadata) {
-        ytDlpState.downloadNodes = null;
+        ytDlpState.downloadState = null;
         download = null;
     } else {
-        download = ytDlpState.downloadNodes;
+        download = ytDlpState.downloadState;
     }
 
     const hasFormats = Array.isArray(metadata.formats) && metadata.formats.length > 0;
@@ -1380,8 +1380,9 @@ function renderYtDlpResults(args = {}) {
 
     groups.push(createResultGroup('Media overview', summaryNodes));
 
-    if (download && download.length) {
-        groups.push(createResultGroup('Your download', download));
+    const downloadNodes = buildYtDlpDownloadNodes(download);
+    if (downloadNodes.length) {
+        groups.push(createResultGroup('Your download', downloadNodes));
     }
 
     const rawPayload = raw && raw.metadata ? raw.metadata : raw;
@@ -1413,6 +1414,40 @@ function setDownloadButtonsState(enabled) {
     if (dom.openModalButton) {
         dom.openModalButton.disabled = !enabled;
     }
+}
+
+function buildYtDlpDownloadNodes(download) {
+    if (!download) {
+        return [];
+    }
+
+    if (Array.isArray(download)) {
+        return download;
+    }
+
+    const nodes = [];
+
+    if (download.blob) {
+        const label = download.blobLabel || 'Download media';
+        nodes.push(createDownloadLinkFromBlob(download.blob, download.filename, label));
+    }
+
+    if (download.directUrl) {
+        const label = download.directLabel || 'Open download link';
+        const directLink = createDownloadLinkFromUrl(download.directUrl, label);
+        if (directLink) {
+            nodes.push(directLink);
+        }
+    }
+
+    if (download.meta && typeof download.meta === 'object' && !Array.isArray(download.meta)) {
+        const entries = Object.keys(download.meta);
+        if (entries.length) {
+            nodes.push(createMetaGrid(download.meta));
+        }
+    }
+
+    return nodes;
 }
 
 function openYtDlpModal() {
@@ -1662,14 +1697,14 @@ async function handleYtDlpDownload(formatId) {
             parseFilename(response.headers.get('Content-Disposition')) ||
             buildFilenameFromMetadata(ytDlpState.metadata, selectedFormat);
 
-        const downloadLink = createDownloadLinkFromBlob(blob, filename, 'Download media');
-        const downloadNodes = [downloadLink];
-
         const directUrl = buildDirectDownloadUrl({ url: payload.url, format: formatId, filename });
-        const directLink = createDownloadLinkFromUrl(directUrl, 'Open API download link');
-        if (directLink) {
-            downloadNodes.push(directLink);
-        }
+        const downloadState = {
+            blob,
+            filename,
+            blobLabel: 'Download media',
+            directUrl,
+            directLabel: 'Open API download link'
+        };
 
         if (selectedFormat) {
             const downloadMeta = {};
@@ -1685,11 +1720,11 @@ async function handleYtDlpDownload(formatId) {
             if (reportedSize) {
                 downloadMeta['Reported size'] = formatBytes(reportedSize) || `${reportedSize} bytes`;
             }
-            downloadNodes.push(createMetaGrid(downloadMeta));
+            downloadState.meta = downloadMeta;
         }
 
         closeYtDlpModal();
-        renderYtDlpResults({ metadata: ytDlpState.metadata, raw: ytDlpState.rawResponse, download: downloadNodes });
+        renderYtDlpResults({ metadata: ytDlpState.metadata, raw: ytDlpState.rawResponse, download: downloadState });
         showToast('Media download ready.');
     } catch (error) {
         console.error(error);

@@ -111,13 +111,8 @@ class BeforeAfterService:
                 for array in np_frames:
                     writer.append_data(array)
             content = Path(temp_file.name).read_bytes()
-        except (RuntimeError, ValueError, OSError, TypeError, ImportError) as exc:  # pragma: no cover - depends on ffmpeg availability
-            message = "Failed to encode animation with ffmpeg"
-            if isinstance(exc, ImportError):
-                message = (
-                    "FFmpeg support is not installed. Install imageio[ffmpeg] or supply an ffmpeg binary"
-                )
-            raise BeforeAfterError(message) from exc
+        except (RuntimeError, ValueError, OSError, TypeError) as exc:  # pragma: no cover - depends on ffmpeg availability
+            raise BeforeAfterError("Failed to encode animation with ffmpeg") from exc
         finally:
             try:
                 Path(temp_file.name).unlink(missing_ok=True)
