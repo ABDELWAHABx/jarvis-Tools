@@ -12,6 +12,7 @@ from app.routers import docx, gdocs_parser, image_tools, js_tools, media, parser
 from app.extensions import local_queue_extension
 from app.utils.logger import logger
 from app.config import settings
+from app.services.cobalt_gateway import CobaltError, create_gateway
 from app.services.cobalt_shortcuts import list_shortcuts
 import time
 
@@ -172,6 +173,23 @@ async def studio(request: Request):
         path = parsed.path if parsed.path not in ("", "/") else ""
         cobalt_display = f"{host}{path}" if path else host
 
+    gateway = getattr(js_tools, "_cobalt_gateway", None)
+    if gateway is None:
+        try:
+            gateway = create_gateway(
+                remote_base_url=settings.COBALT_API_BASE_URL,
+                auth_scheme=settings.COBALT_API_AUTH_SCHEME,
+                auth_token=settings.COBALT_API_AUTH_TOKEN,
+                timeout=settings.COBALT_API_TIMEOUT,
+            )
+            js_tools._cobalt_gateway = gateway
+        except CobaltError:
+            gateway = None
+
+    local_available = bool(gateway and gateway.has_local)
+    remote_available = bool(gateway and gateway.has_remote)
+    configured = local_available or remote_available
+
     cobalt_shortcuts = [
         {
             "slug": shortcut.slug,
@@ -190,10 +208,12 @@ async def studio(request: Request):
             "openapi_url": app.openapi_url or "/openapi.json",
             "version": app.version or "",
             "cobalt_status": {
-                "configured": bool(cobalt_base),
-                "using_fallback": getattr(settings, "COBALT_API_BASE_URL_FALLBACK", False),
+                "configured": configured,
+                "using_fallback": local_available and not remote_available,
                 "base_url": cobalt_base,
                 "display_name": cobalt_display,
+                "remote_available": remote_available,
+                "local_available": local_available,
             },
             "cobalt_shortcuts": cobalt_shortcuts,
         },
