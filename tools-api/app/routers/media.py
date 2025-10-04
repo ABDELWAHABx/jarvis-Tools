@@ -1,6 +1,7 @@
 """Endpoints for media tooling such as yt-dlp."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from enum import Enum
@@ -8,9 +9,12 @@ from typing import Any, Dict, Literal
 from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
-from pydantic import AnyHttpUrl, BaseModel, Field
+from fastapi.responses import StreamingResponse
+from pydantic import AnyHttpUrl, BaseModel, Field, constr
 
+from app.services.progress_manager import progress_manager
 from app.services.yt_dlp_service import DownloadResult, YtDlpServiceError, yt_dlp_service
 from app.utils.logger import logger
 
@@ -101,6 +105,10 @@ class YtDlpRequest(BaseModel):
         description="Optional filename to use when returning binary content. Defaults to yt-dlp's detected name.",
     )
     options: YtDlpOptions = Field(default_factory=YtDlpOptions, description="Advanced yt-dlp options.")
+    job_id: constr(strip_whitespace=True, min_length=4, max_length=64, pattern=r"^[A-Za-z0-9_-]+$") | None = Field(
+        default=None,
+        description="Client-supplied identifier used to stream progress updates via server-sent events.",
+    )
 
 
 class YtDlpMetadataResponse(BaseModel):
@@ -140,18 +148,71 @@ async def yt_dlp_endpoint(request: YtDlpRequest):
 
     try:
         if request.response_format == "binary":
-            download: DownloadResult = yt_dlp_service.download(
-                url,
-                options=options,
-                filename_override=request.filename,
-            )
+            progress_job_id = request.job_id
+            progress_callback = None
+
+            if progress_job_id:
+                progress_manager.ensure_channel(progress_job_id)
+                progress_manager.publish(
+                    progress_job_id,
+                    {"type": "progress", "stage": "starting", "message": "Preparing download"},
+                )
+
+                def _progress_forwarder(event: Dict[str, Any]) -> None:
+                    progress_manager.publish(progress_job_id, event)
+
+                progress_callback = _progress_forwarder
+
+            download_kwargs: Dict[str, Any] = {
+                "options": options,
+                "filename_override": request.filename,
+            }
+            if progress_callback is not None:
+                download_kwargs["progress_callback"] = progress_callback
+
+            try:
+                download: DownloadResult = await run_in_threadpool(
+                    yt_dlp_service.download,
+                    url,
+                    **download_kwargs,
+                )
+            except YtDlpServiceError as exc:
+                if progress_job_id:
+                    progress_manager.publish(
+                        progress_job_id,
+                        {"type": "error", "stage": "failed", "message": str(exc)},
+                    )
+                logger.error("yt-dlp request failed: %s", exc)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except Exception as exc:  # pragma: no cover - guard against unexpected failures
+                if progress_job_id:
+                    progress_manager.publish(
+                        progress_job_id,
+                        {"type": "error", "stage": "failed", "message": "Download failed"},
+                    )
+                logger.exception("Unexpected yt-dlp failure")
+                raise
+            else:
+                if progress_job_id:
+                    progress_manager.publish(
+                        progress_job_id,
+                        {"type": "progress", "stage": "packaging", "message": "Packaging download"},
+                    )
+                    progress_manager.publish(
+                        progress_job_id,
+                        {"type": "complete", "stage": "ready", "message": "Download ready"},
+                    )
+            finally:
+                if progress_job_id:
+                    progress_manager.close(progress_job_id)
+
             headers = {
                 "Content-Disposition": _content_disposition(download.filename),
                 "X-YtDlp-Metadata": _metadata_header(download.metadata),
             }
             return _BinaryResponse(download, headers)
 
-        metadata = yt_dlp_service.extract_info(url, options=options)
+        metadata = await run_in_threadpool(yt_dlp_service.extract_info, url, options=options)
         shortcuts = _shortcut_links(url)
         return YtDlpMetadataResponse(metadata=jsonable_encoder(metadata), shortcuts=shortcuts)
     except YtDlpServiceError as exc:
@@ -170,7 +231,8 @@ async def yt_dlp_quick_download(preset: YtDlpShortcut, url: AnyHttpUrl, filename
     options = dict(config.get("options", {}))
 
     try:
-        download: DownloadResult = yt_dlp_service.download(
+        download: DownloadResult = await run_in_threadpool(
+            yt_dlp_service.download,
             str(url),
             options=options,
             filename_override=filename,
@@ -193,7 +255,8 @@ async def yt_dlp_direct_download(url: AnyHttpUrl, format: str, filename: str | N
     options = {"format": format, "noplaylist": True}
 
     try:
-        download: DownloadResult = yt_dlp_service.download(
+        download: DownloadResult = await run_in_threadpool(
+            yt_dlp_service.download,
             str(url),
             options=options,
             filename_override=filename,
@@ -213,4 +276,29 @@ def _BinaryResponse(result: DownloadResult, headers: Dict[str, str]):
     from fastapi import Response
 
     return Response(content=result.content, media_type=result.content_type, headers=headers)
+
+
+@router.get("/yt-dlp/progress/{job_id}")
+async def yt_dlp_progress(job_id: str):
+    """Stream yt-dlp progress updates for a specific job as Server-Sent Events."""
+
+    try:
+        progress_manager.ensure_channel(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def event_stream():
+        try:
+            async for event in progress_manager.iter_events(job_id):
+                yield progress_manager.format_sse(event)
+        except asyncio.CancelledError:  # pragma: no cover - network interruption
+            logger.debug("Progress stream for %s cancelled", job_id)
+            raise
+        finally:
+            progress_manager.close(job_id)
+
+    response = StreamingResponse(event_stream(), media_type="text/event-stream")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
 

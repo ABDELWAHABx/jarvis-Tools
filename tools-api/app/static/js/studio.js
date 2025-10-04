@@ -13,7 +13,9 @@ const ytDlpState = {
     subtitleLanguageFilter: 'en',
     downloadNodes: null,
     downloadProgress: null,
-    downloadProgressTimer: null
+    downloadProgressTimer: null,
+    progressSource: null,
+    currentJobId: null
 };
 
 const COBALT_FIELD_IDS = {
@@ -1678,7 +1680,10 @@ async function handleYtDlpDownload(formatId) {
             throw new Error('Select a valid format to download.');
         }
         const payload = buildYtDlpPayload('binary', { formatOverride: formatId });
+        const jobId = generateYtDlpJobId();
+        payload.job_id = jobId;
         startYtDlpDownloadProgress();
+        openYtDlpProgressStream(jobId);
         const { blob, response } = await fetchBinaryWithProgress(
             '/media/yt-dlp',
             {
@@ -1688,9 +1693,10 @@ async function handleYtDlpDownload(formatId) {
                 },
                 body: JSON.stringify(payload)
             },
-            (loaded, total) => updateYtDlpDownloadProgress(loaded, total)
+            (loaded, total) => updateYtDlpDownloadProgress(loaded, total, { stage: 'downloading' })
         );
         completeYtDlpDownloadProgress('Download ready');
+        closeYtDlpProgressStream();
         const selectedFormat = ytDlpState.formatsById.get(formatId) || null;
         const filename =
             payload.filename ||
@@ -1735,9 +1741,11 @@ async function handleYtDlpDownload(formatId) {
     } catch (error) {
         console.error(error);
         failYtDlpDownloadProgress(error.message || 'Download failed');
+        closeYtDlpProgressStream();
         showToast(error.message || 'Download failed', 'error');
         return;
     } finally {
+        closeYtDlpProgressStream();
         if (downloadButton) {
             const fallback = downloadButton.dataset.originalLabel || originalLabel || 'Download selection';
             downloadButton.textContent = fallback;
@@ -2080,21 +2088,150 @@ async function fetchBinaryWithProgress(url, options, onProgress) {
     return { blob, response };
 }
 
+function generateYtDlpJobId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    const random = Math.random().toString(36).slice(2, 10);
+    return `yt-dlp-${Date.now()}-${random}`;
+}
+
+function openYtDlpProgressStream(jobId) {
+    if (!jobId || typeof window.EventSource !== 'function') {
+        return null;
+    }
+
+    closeYtDlpProgressStream();
+
+    const url = `/media/yt-dlp/progress/${encodeURIComponent(jobId)}`;
+
+    try {
+        const source = new EventSource(url);
+        ytDlpState.progressSource = source;
+        ytDlpState.currentJobId = jobId;
+
+        source.onmessage = (event) => {
+            if (!event || !event.data) {
+                return;
+            }
+            try {
+                const payload = JSON.parse(event.data);
+                handleYtDlpProgressEvent(payload);
+            } catch (error) {
+                console.warn('Failed to parse yt-dlp progress payload', error);
+            }
+        };
+
+        source.onerror = () => {
+            if (source.readyState === EventSource.CLOSED) {
+                closeYtDlpProgressStream();
+            }
+        };
+
+        return source;
+    } catch (error) {
+        console.warn('Unable to subscribe to yt-dlp progress events', error);
+        return null;
+    }
+}
+
+function closeYtDlpProgressStream() {
+    if (ytDlpState.progressSource && typeof ytDlpState.progressSource.close === 'function') {
+        ytDlpState.progressSource.close();
+    }
+    ytDlpState.progressSource = null;
+    ytDlpState.currentJobId = null;
+}
+
+function handleYtDlpProgressEvent(event) {
+    if (!event || typeof event !== 'object') {
+        return;
+    }
+
+    const type = event.type || 'progress';
+
+    if (type === 'progress') {
+        const loaded = Number(event.downloaded_bytes ?? event.downloadedBytes);
+        const total = Number(event.total_bytes ?? event.totalBytes);
+        const extras = {
+            stage: event.stage,
+            message: typeof event.message === 'string' ? event.message : null,
+            speed: Number(event.speed),
+            eta: Number.isFinite(Number(event.eta)) ? Number(event.eta) : null
+        };
+        const hasLoaded = Number.isFinite(loaded) ? loaded : undefined;
+        const hasTotal = Number.isFinite(total) ? total : undefined;
+        updateYtDlpDownloadProgress(hasLoaded, hasTotal, extras);
+    } else if (type === 'complete') {
+        completeYtDlpDownloadProgress(event.message || 'Download ready');
+        closeYtDlpProgressStream();
+    } else if (type === 'error') {
+        failYtDlpDownloadProgress(event.message || 'Download failed');
+        closeYtDlpProgressStream();
+    } else if (type === 'message' && typeof event.message === 'string') {
+        updateYtDlpDownloadProgress(undefined, undefined, { message: event.message });
+    }
+}
+
+function ytDlpStageMessage(stage) {
+    switch (stage) {
+        case 'starting':
+            return 'Preparing download…';
+        case 'downloading':
+            return 'Downloading media…';
+        case 'packaging':
+            return 'Packaging download…';
+        case 'finished':
+            return 'Wrapping up download…';
+        default:
+            return null;
+    }
+}
+
 function startYtDlpDownloadProgress() {
     cancelYtDlpProgressReset();
-    ytDlpState.downloadProgress = { status: 'active', loaded: 0, total: null };
+    ytDlpState.downloadProgress = {
+        status: 'active',
+        stage: 'starting',
+        loaded: 0,
+        total: null,
+        speed: null,
+        eta: null,
+        message: 'Preparing download…'
+    };
     renderYtDlpProgress();
 }
 
-function updateYtDlpDownloadProgress(loaded, total) {
+function updateYtDlpDownloadProgress(loaded, total, extras = {}) {
     if (!ytDlpState.downloadProgress) {
         startYtDlpDownloadProgress();
     }
     const progress = ytDlpState.downloadProgress;
     progress.status = 'active';
-    progress.loaded = Number.isFinite(loaded) && loaded >= 0 ? loaded : 0;
+    if (Number.isFinite(loaded) && loaded >= 0) {
+        progress.loaded = loaded;
+    }
     if (Number.isFinite(total) && total > 0) {
         progress.total = total;
+    }
+    if (Number.isFinite(extras.speed) && extras.speed >= 0) {
+        progress.speed = extras.speed;
+    }
+    if (Number.isFinite(extras.eta) && extras.eta >= 0) {
+        progress.eta = extras.eta;
+    } else if (extras.eta === null) {
+        progress.eta = null;
+    }
+    if (typeof extras.stage === 'string' && extras.stage.trim()) {
+        progress.stage = extras.stage.trim();
+    }
+    if (typeof extras.message === 'string' && extras.message.trim()) {
+        progress.message = extras.message.trim();
+    } else if (extras.stage) {
+        const stageMessage = ytDlpStageMessage(extras.stage);
+        if (stageMessage) {
+            progress.message = stageMessage;
+        }
     }
     renderYtDlpProgress();
 }
@@ -2109,6 +2246,9 @@ function completeYtDlpDownloadProgress(message) {
         progress.total = progress.loaded;
     }
     progress.message = message || 'Download ready';
+    progress.stage = 'complete';
+    progress.speed = null;
+    progress.eta = null;
     renderYtDlpProgress();
     scheduleYtDlpProgressReset(2400);
 }
@@ -2118,6 +2258,9 @@ function failYtDlpDownloadProgress(message) {
     const progress = ytDlpState.downloadProgress;
     progress.status = 'error';
     progress.message = message || 'Download failed';
+    progress.stage = 'error';
+    progress.speed = null;
+    progress.eta = null;
     renderYtDlpProgress();
     scheduleYtDlpProgressReset(3200);
 }
@@ -2178,6 +2321,7 @@ function renderYtDlpProgress() {
     let labelText = progress.message || '';
     let percentText = '';
     let width = null;
+    const extras = [];
 
     if (status === 'error') {
         labelText = progress.message || 'Download failed';
@@ -2199,6 +2343,25 @@ function renderYtDlpProgress() {
         } else {
             labelText = progress.message || `Downloading… ${loadedLabel}`;
         }
+    }
+
+    if (status === 'active') {
+        if (Number.isFinite(progress.speed) && progress.speed > 0) {
+            const speedLabel = formatBytes(progress.speed);
+            if (speedLabel) {
+                extras.push(`${speedLabel}/s`);
+            }
+        }
+        if (Number.isFinite(progress.eta) && progress.eta > 0) {
+            const etaLabel = formatDuration(progress.eta);
+            if (etaLabel) {
+                extras.push(`ETA ${etaLabel}`);
+            }
+        }
+    }
+
+    if (extras.length) {
+        labelText = labelText ? `${labelText} • ${extras.join(' • ')}` : extras.join(' • ');
     }
 
     container.classList.toggle('is-indeterminate', status === 'active' && !hasTotal);
