@@ -11,7 +11,7 @@ const ytDlpState = {
     modalKeyListener: null,
     selectedFormatId: null,
     subtitleLanguageFilter: 'en',
-    downloadState: null,
+    downloadNodes: null,
     downloadProgress: null,
     downloadProgressTimer: null
 };
@@ -1272,7 +1272,7 @@ function renderYtDlpResults(args = {}) {
     if (!metadata) {
         ytDlpState.metadata = null;
         ytDlpState.rawResponse = null;
-        ytDlpState.downloadState = null;
+        ytDlpState.downloadNodes = null;
         setResult('media-results', []);
         setDownloadButtonsState(false);
         return;
@@ -1287,12 +1287,12 @@ function renderYtDlpResults(args = {}) {
     }
 
     if (download !== undefined) {
-        ytDlpState.downloadState = download;
+        ytDlpState.downloadNodes = download;
     } else if (isNewMetadata) {
-        ytDlpState.downloadState = null;
+        ytDlpState.downloadNodes = null;
         download = null;
     } else {
-        download = ytDlpState.downloadState;
+        download = ytDlpState.downloadNodes;
     }
 
     const hasFormats = Array.isArray(metadata.formats) && metadata.formats.length > 0;
@@ -1705,6 +1705,12 @@ async function handleYtDlpDownload(formatId) {
             directUrl,
             directLabel: 'Open API download link'
         };
+
+        const directUrl = buildDirectDownloadUrl({ url: payload.url, format: formatId, filename });
+        const directLink = createDownloadLinkFromUrl(directUrl, 'Open API download link');
+        if (directLink) {
+            downloadNodes.push(directLink);
+        }
 
         if (selectedFormat) {
             const downloadMeta = {};
