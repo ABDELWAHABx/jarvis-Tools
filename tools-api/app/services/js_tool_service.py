@@ -79,6 +79,20 @@ def _ensure_dependencies(tool_dir: Path) -> None:
             raise JavaScriptToolError("Failed to install JavaScript tool dependencies")
 
 
+def ensure_panosplitter_ready() -> None:
+    """Pre-flight helper to make sure the Node-based panosplitter is usable."""
+
+    _ensure_node_available()
+
+    tool_dir = Path(__file__).resolve().parents[2] / "js_tools" / "panosplitter"
+    cli_path = tool_dir / "cli.js"
+    if not cli_path.exists():
+        raise JavaScriptToolError("Panosplitter CLI script not found")
+
+    _ensure_dependencies(tool_dir)
+    logger.info("Panosplitter dependencies are ready at %s", tool_dir)
+
+
 def _parse_cli_output(stdout: str) -> PanosplitterResult:
     """Parse the JSON payload emitted by the Node.js CLI."""
 
