@@ -282,10 +282,9 @@ function setupBeforeAfterForm() {
         });
         const result = await parseResponse(response);
 
-        const video = document.createElement('video');
-        video.controls = true;
-        video.src = `data:${result.content_type};base64,${result.video_base64}`;
-        video.setAttribute('playsinline', '');
+        const video = createVideoFromBase64(result.video_base64, result.content_type, {
+            controls: true
+        });
 
         const download = createDownloadLinkFromBase64(
             result.video_base64,
@@ -294,7 +293,11 @@ function setupBeforeAfterForm() {
             'Download MP4'
         );
 
-        const elements = [video, download];
+        const elements = [];
+        if (video) {
+            elements.push(video);
+        }
+        elements.push(download);
         if (result.message) {
             elements.push(createNotice(result.message));
         }
@@ -324,17 +327,23 @@ function setupPanosplitterForm() {
         });
         const result = await parseResponse(response);
 
-        const preview = new Image();
-        preview.src = `data:${result.full_view.content_type};base64,${result.full_view.base64}`;
-        preview.alt = 'Panosplitter preview';
+        const preview = createImageFromBase64(
+            result.full_view && result.full_view.base64,
+            result.full_view && result.full_view.content_type,
+            'Panosplitter preview'
+        );
 
         const slicesGrid = document.createElement('div');
         slicesGrid.className = 'slice-grid';
         (result.slices || []).slice(0, 8).forEach((slice, index) => {
-            const img = new Image();
-            img.src = `data:${slice.content_type};base64,${slice.base64}`;
-            img.alt = `Slice ${index + 1}`;
-            slicesGrid.appendChild(img);
+            const img = createImageFromBase64(
+                slice && slice.base64,
+                slice && slice.content_type,
+                `Slice ${index + 1}`
+            );
+            if (img) {
+                slicesGrid.appendChild(img);
+            }
         });
 
         const download = createDownloadLinkFromBase64(
@@ -344,7 +353,11 @@ function setupPanosplitterForm() {
             'Download Zip'
         );
 
-        const elements = [preview, slicesGrid, download];
+        const elements = [];
+        if (preview) {
+            elements.push(preview);
+        }
+        elements.push(slicesGrid, download);
         elements.push(createMetaGrid(result.metadata));
         if (result.manifest) {
             elements.push(createPre(result.manifest));
@@ -634,6 +647,7 @@ function setResult(containerId, groups) {
     if (!container) {
         return;
     }
+    revokeObjectUrls(container);
     container.innerHTML = '';
     if (!groups || !groups.length) {
         const paragraph = document.createElement('p');
@@ -666,6 +680,19 @@ function createPre(data) {
         pre.textContent = JSON.stringify(data, null, 2);
     }
     return pre;
+}
+
+function revokeObjectUrls(container) {
+    if (!container) {
+        return;
+    }
+    container.querySelectorAll('[data-object-url]').forEach((node) => {
+        const url = node.getAttribute('data-object-url');
+        if (url) {
+            URL.revokeObjectURL(url);
+        }
+        node.removeAttribute('data-object-url');
+    });
 }
 
 function createMetaGrid(meta) {
@@ -814,13 +841,54 @@ function escapeHtml(value) {
 }
 
 function base64ToBlob(base64, contentType) {
-    const binary = window.atob(base64);
+    const binary = window.atob(base64 || '');
     const len = binary.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i += 1) {
         bytes[i] = binary.charCodeAt(i);
     }
     return new Blob([bytes], { type: contentType || 'application/octet-stream' });
+}
+
+function createObjectUrlFromBase64(base64, contentType) {
+    const blob = base64ToBlob(base64, contentType);
+    return URL.createObjectURL(blob);
+}
+
+function createImageFromBase64(base64, contentType, altText = '') {
+    if (!base64) {
+        return null;
+    }
+    const url = createObjectUrlFromBase64(base64, contentType || 'image/jpeg');
+    const img = document.createElement('img');
+    img.alt = altText || '';
+    img.decoding = 'async';
+    img.loading = 'lazy';
+    img.src = url;
+    img.dataset.objectUrl = url;
+    return img;
+}
+
+function createVideoFromBase64(base64, contentType, options = {}) {
+    if (!base64) {
+        return null;
+    }
+    const url = createObjectUrlFromBase64(base64, contentType || 'video/mp4');
+    const video = document.createElement('video');
+    if (options.controls !== false) {
+        video.controls = true;
+    }
+    if (options.autoplay) {
+        video.autoplay = true;
+        video.muted = true;
+    }
+    if (options.loop) {
+        video.loop = true;
+    }
+    video.setAttribute('playsinline', '');
+    video.src = url;
+    video.dataset.objectUrl = url;
+    return video;
 }
 
 function createDownloadLinkFromBase64(base64, contentType, filename, label) {
@@ -835,10 +903,14 @@ function createDownloadLinkFromBlob(blob, filename, label = 'Download') {
     link.download = filename || 'download';
     link.className = 'download-link';
     link.textContent = label;
+    link.dataset.objectUrl = url;
     link.addEventListener(
         'click',
         () => {
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+                link.removeAttribute('data-object-url');
+            }, 1000);
         },
         { once: true }
     );
