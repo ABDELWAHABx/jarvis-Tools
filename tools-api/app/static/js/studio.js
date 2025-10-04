@@ -61,8 +61,8 @@ function initialiseResultPanels() {
         'parser-results': 'Run a parser request to inspect Docs operations.',
         'docx-results': 'Upload a DOCX file to extract text.',
         'image-results': 'Generate a glow or before/after clip to preview the output.',
-        'js-results': 'Split a panorama to see generated slices and download bundles.',
-        'media-results': 'Inspect a media URL with yt-dlp to reveal metadata or downloads.'
+        'js-results': 'Split a panorama or proxy a Cobalt download to inspect generated assets.',
+        'media-results': 'Inspect a media URL with yt-dlp to reveal metadata, downloads, and subtitles.'
     };
 
     Object.entries(placeholders).forEach(([id, message]) => {
@@ -123,6 +123,7 @@ function setupForms() {
     setupHalationsForm();
     setupBeforeAfterForm();
     setupPanosplitterForm();
+    setupCobaltForm();
     setupYtDlpForm();
 }
 
@@ -354,12 +355,96 @@ function setupPanosplitterForm() {
     });
 }
 
+function setupCobaltForm() {
+    attachSubmit('cobalt-form', async () => {
+        const urlField = document.getElementById('cobalt-url');
+        const binaryToggle = document.getElementById('cobalt-binary');
+        const filenameField = document.getElementById('cobalt-filename');
+        const payloadField = document.getElementById('cobalt-payload');
+
+        const urlValue = urlField.value.trim();
+        if (!urlValue) {
+            throw new Error('Provide a URL to send to Cobalt.');
+        }
+
+        const rawPayload = payloadField.value.trim();
+        let extraPayload = {};
+        if (rawPayload) {
+            try {
+                extraPayload = JSON.parse(rawPayload);
+            } catch (error) {
+                throw new Error('Raw Cobalt payload must be valid JSON.');
+            }
+            if (!extraPayload || typeof extraPayload !== 'object' || Array.isArray(extraPayload)) {
+                throw new Error('Raw Cobalt payload must be a JSON object.');
+            }
+        }
+
+        const payload = {
+            ...(extraPayload || {}),
+            url: urlValue,
+            response_format: binaryToggle.checked ? 'binary' : 'json'
+        };
+
+        const filenameOverride = filenameField.value.trim();
+        if (filenameOverride) {
+            payload.download_filename = filenameOverride;
+        }
+
+        const response = await fetch('/js-tools/cobalt', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (binaryToggle.checked) {
+            const blob = await parseBinaryResponse(response);
+            const filename =
+                filenameOverride ||
+                parseFilename(response.headers.get('Content-Disposition')) ||
+                'cobalt-download.bin';
+            const metadataHeader = response.headers.get('X-Cobalt-Metadata');
+            const metadata = metadataHeader ? safeJsonDecode(atob(metadataHeader)) : null;
+
+            const groups = [
+                createResultGroup('Cobalt Download', [
+                    createDownloadLinkFromBlob(blob, filename, 'Download Media')
+                ])
+            ];
+            if (metadata) {
+                groups.push(createResultGroup('Cobalt Metadata', [createPre(metadata)]));
+                groups.push(...buildSubtitleGroups(metadata));
+            }
+
+            setResult('js-results', groups);
+            showToast('Cobalt download ready.');
+        } else {
+            const result = await parseResponse(response);
+            const groups = [createResultGroup('Cobalt Response', [createPre(result)])];
+            const subtitleGroups = buildSubtitleGroups((result && result.metadata) || result);
+            if (subtitleGroups.length) {
+                groups.push(...subtitleGroups);
+            }
+            setResult('js-results', groups);
+            showToast('Cobalt response received.');
+        }
+    });
+}
+
 function setupYtDlpForm() {
     attachSubmit('yt-dlp-form', async (form) => {
         const urlField = document.getElementById('yt-dlp-url');
         const formatField = document.getElementById('yt-dlp-format');
         const binaryToggle = document.getElementById('yt-dlp-binary');
         const filenameField = document.getElementById('yt-dlp-filename');
+        const playlistItemsField = document.getElementById('yt-dlp-playlist-items');
+        const headersField = document.getElementById('yt-dlp-headers');
+        const proxyField = document.getElementById('yt-dlp-proxy');
+        const writeSubtitlesToggle = document.getElementById('yt-dlp-write-subtitles');
+        const writeAutoSubToggle = document.getElementById('yt-dlp-write-auto-sub');
+        const subtitleLangsField = document.getElementById('yt-dlp-subtitle-langs');
 
         const urlValue = urlField.value.trim();
         if (!urlValue) {
@@ -377,6 +462,45 @@ function setupYtDlpForm() {
 
         if (formatField.value.trim()) {
             payload.options.format = formatField.value.trim();
+        }
+
+        if (playlistItemsField && playlistItemsField.value.trim()) {
+            payload.options.playlist_items = playlistItemsField.value.trim();
+        }
+
+        if (headersField && headersField.value.trim()) {
+            try {
+                const parsedHeaders = JSON.parse(headersField.value.trim());
+                if (!parsedHeaders || typeof parsedHeaders !== 'object' || Array.isArray(parsedHeaders)) {
+                    throw new Error();
+                }
+                payload.options.http_headers = parsedHeaders;
+            } catch (error) {
+                throw new Error('HTTP headers must be a valid JSON object.');
+            }
+        }
+
+        if (proxyField && proxyField.value.trim()) {
+            payload.options.proxy = proxyField.value.trim();
+        }
+
+        if (writeSubtitlesToggle && writeSubtitlesToggle.checked) {
+            payload.options.writesubtitles = true;
+        }
+
+        if (writeAutoSubToggle && writeAutoSubToggle.checked) {
+            payload.options.writeautomaticsub = true;
+        }
+
+        if (subtitleLangsField && subtitleLangsField.value.trim()) {
+            const languages = subtitleLangsField
+                .value
+                .split(',')
+                .map((item) => item.trim())
+                .filter((item) => item.length);
+            if (languages.length) {
+                payload.options.subtitleslangs = languages;
+            }
         }
 
         const response = await fetch('/media/yt-dlp', {
@@ -397,12 +521,21 @@ function setupYtDlpForm() {
             const groups = [createResultGroup('Downloaded Media', [download])];
             if (metadata) {
                 groups.push(createResultGroup('Metadata', [createPre(metadata)]));
+                const subtitleGroups = buildSubtitleGroups(metadata);
+                if (subtitleGroups.length) {
+                    groups.push(...subtitleGroups);
+                }
             }
             setResult('media-results', groups);
             showToast('Media download ready.');
         } else {
             const result = await parseResponse(response);
-            setResult('media-results', [createResultGroup('yt-dlp Metadata', [createPre(result.metadata)])]);
+            const groups = [createResultGroup('yt-dlp Metadata', [createPre(result.metadata)])];
+            const subtitleGroups = buildSubtitleGroups(result.metadata);
+            if (subtitleGroups.length) {
+                groups.push(...subtitleGroups);
+            }
+            setResult('media-results', groups);
             showToast('Metadata retrieved successfully.');
         }
     });
@@ -551,6 +684,120 @@ function createMetaGrid(meta) {
         grid.appendChild(item);
     });
     return grid;
+}
+
+function buildSubtitleGroups(metadata) {
+    if (!metadata || typeof metadata !== 'object') {
+        return [];
+    }
+
+    const sections = [
+        ['requested_subtitles', 'Requested Subtitles'],
+        ['automatic_captions', 'Automatic Captions'],
+        ['subtitles', 'Available Subtitles']
+    ];
+
+    return sections
+        .map(([key, label]) => {
+            const entries = metadata[key];
+            if (!entries || typeof entries !== 'object' || Array.isArray(entries)) {
+                return null;
+            }
+            const list = createSubtitleList(entries);
+            if (!list) {
+                return null;
+            }
+            return createResultGroup(label, [list]);
+        })
+        .filter(Boolean);
+}
+
+function createSubtitleList(entries) {
+    const languages = Object.keys(entries || {});
+    if (!languages.length) {
+        return null;
+    }
+    const wrapper = document.createElement('div');
+    wrapper.className = 'subtitle-list';
+
+    languages.forEach((lang) => {
+        const row = document.createElement('div');
+        row.className = 'subtitle-row';
+
+        const langBadge = document.createElement('span');
+        langBadge.className = 'subtitle-lang';
+        langBadge.textContent = lang;
+        row.appendChild(langBadge);
+
+        const details = document.createElement('div');
+        details.className = 'subtitle-details';
+
+        const value = entries[lang];
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            const metaParts = [];
+            if (value.ext) {
+                metaParts.push(`.${value.ext}`);
+            }
+            if (value.format) {
+                metaParts.push(value.format);
+            }
+            if (value.filesize) {
+                const formatted = formatBytes(value.filesize);
+                metaParts.push(formatted ? `${formatted}` : `${value.filesize} bytes`);
+            } else if (value.filesize_approx) {
+                const formattedApprox = formatBytes(value.filesize_approx);
+                metaParts.push(formattedApprox ? `≈${formattedApprox}` : `≈${value.filesize_approx} bytes`);
+            }
+
+            if (metaParts.length) {
+                const meta = document.createElement('span');
+                meta.textContent = metaParts.join(' · ');
+                details.appendChild(meta);
+            }
+
+            if (value.url) {
+                if (details.childNodes.length) {
+                    details.appendChild(document.createTextNode(' '));
+                }
+                const link = document.createElement('a');
+                link.href = value.url;
+                link.target = '_blank';
+                link.rel = 'noreferrer';
+                link.textContent = 'Open URL';
+                link.className = 'subtitle-link';
+                details.appendChild(link);
+            }
+
+            if (!details.childNodes.length) {
+                details.textContent = JSON.stringify(value);
+            }
+        } else if (value) {
+            details.textContent = typeof value === 'string' ? value : JSON.stringify(value);
+        } else {
+            details.textContent = 'Unavailable';
+        }
+
+        row.appendChild(details);
+        wrapper.appendChild(row);
+    });
+
+    return wrapper;
+}
+
+function formatBytes(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) {
+        return null;
+    }
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let unitIndex = 0;
+    let result = value;
+    while (result >= 1024 && unitIndex < units.length - 1) {
+        result /= 1024;
+        unitIndex += 1;
+    }
+    const decimals = result >= 10 || unitIndex === 0 ? 0 : 1;
+    return `${result.toFixed(decimals)} ${units[unitIndex]}`;
 }
 
 function createNotice(message) {

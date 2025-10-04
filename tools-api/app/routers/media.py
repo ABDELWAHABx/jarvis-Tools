@@ -32,6 +32,18 @@ class YtDlpOptions(BaseModel):
         description="Optional HTTP headers to send with the request (e.g. cookies or authorization).",
     )
     proxy: str | None = Field(default=None, description="Optional proxy URL passed directly to yt-dlp.")
+    writesubtitles: bool = Field(
+        default=False,
+        description="Download subtitles alongside the main media when available.",
+    )
+    writeautomaticsub: bool = Field(
+        default=False,
+        description="Download automatically generated subtitles if authored subtitles are missing.",
+    )
+    subtitleslangs: list[str] | None = Field(
+        default=None,
+        description="List of subtitle language codes to prioritise (yt-dlp subtitleslangs option).",
+    )
 
     def to_yt_dlp_kwargs(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
@@ -44,6 +56,12 @@ class YtDlpOptions(BaseModel):
             payload["http_headers"] = self.http_headers
         if self.proxy:
             payload["proxy"] = self.proxy
+        if self.writesubtitles:
+            payload["writesubtitles"] = True
+        if self.writeautomaticsub:
+            payload["writeautomaticsub"] = True
+        if self.subtitleslangs:
+            payload["subtitleslangs"] = self.subtitleslangs
         return payload
 
 

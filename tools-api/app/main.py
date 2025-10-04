@@ -22,7 +22,14 @@ app = FastAPI(
 
 # Static and template configuration
 BASE_DIR = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+# Allow running the API (and tests) without the optional jinja2 dependency.
+try:
+    templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+except AssertionError as exc:  # pragma: no cover - exercised indirectly in tests when jinja2 missing
+    templates = None
+    logger.warning(
+        "Studio templates disabled because optional dependency is missing: %s", exc
+    )
 static_dir = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -130,6 +137,30 @@ async def health():
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def studio(request: Request):
     """Serve the interactive Tools API Studio dashboard."""
+    if templates is None:
+        body = """
+        <!DOCTYPE html>
+        <html lang=\"en\">
+            <head>
+                <meta charset=\"utf-8\" />
+                <title>Tools API Studio</title>
+                <style>
+                    body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 640px; line-height: 1.6; padding: 0 1.5rem; }
+                    pre { background: #f5f5f5; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
+                    a { color: #2563eb; }
+                </style>
+            </head>
+            <body>
+                <h1>Tools API Studio</h1>
+                <p>The interactive Studio requires the optional <code>jinja2</code> dependency, which is not installed in this environment.</p>
+                <p>Install it and reload the page:</p>
+                <pre>pip install jinja2</pre>
+                <p>Once installed, the full Studio experience (including the Cobalt downloader and yt-dlp enhancements) will render automatically.</p>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=body, status_code=200)
+
     return templates.TemplateResponse(
         "studio.html",
         {

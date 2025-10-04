@@ -382,6 +382,59 @@ textarea {
     background: rgba(79, 139, 255, 0.3);
 }
 
+.subtitle-list {
+    display: grid;
+    gap: 10px;
+}
+
+.subtitle-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+}
+
+.subtitle-lang {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(79, 139, 255, 0.2);
+    color: var(--text);
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.subtitle-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.subtitle-details span {
+    color: var(--text);
+    font-weight: 500;
+}
+
+.subtitle-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.subtitle-link:hover {
+    text-decoration: underline;
+}
+
 .meta-grid {
     display: grid;
     gap: 10px;
