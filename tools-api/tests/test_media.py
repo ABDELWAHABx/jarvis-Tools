@@ -15,18 +15,41 @@ def client():
 
 
 def test_yt_dlp_metadata_endpoint(client, monkeypatch):
-    sample_metadata = {"id": "demo", "title": "Sample", "duration": 10}
+    sample_metadata = {
+        "id": "demo",
+        "title": "Sample",
+        "duration": 10,
+        "requested_subtitles": {"en": {"ext": "vtt", "url": "https://example.com/subs.vtt"}},
+    }
 
     def fake_extract(url: str, *, options):
         assert url == "https://example.com/video"
         assert options["noplaylist"] is True
+        assert options["format"] == "best"
+        assert options["playlist_items"] == "1-3"
+        assert options["http_headers"] == {"Cookie": "session=abc"}
+        assert options["proxy"] == "socks5://localhost:9050"
+        assert options["writesubtitles"] is True
+        assert options["writeautomaticsub"] is True
+        assert options["subtitleslangs"] == ["en", "es"]
         return sample_metadata
 
     monkeypatch.setattr(media_router.yt_dlp_service, "extract_info", fake_extract)
 
     response = client.post(
         "/media/yt-dlp",
-        json={"url": "https://example.com/video"},
+        json={
+            "url": "https://example.com/video",
+            "options": {
+                "format": "best",
+                "playlist_items": "1-3",
+                "http_headers": {"Cookie": "session=abc"},
+                "proxy": "socks5://localhost:9050",
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": ["en", "es"],
+            },
+        },
     )
 
     assert response.status_code == 200
