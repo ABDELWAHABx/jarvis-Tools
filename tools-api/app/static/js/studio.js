@@ -3,6 +3,33 @@ const OPENAPI_URL = config.openapiUrl || '/openapi.json';
 const toastState = { timer: null };
 let endpointCatalogue = null;
 
+const COBALT_FIELD_IDS = {
+    service: 'cobalt-service',
+    downloadMode: 'cobalt-download-mode',
+    filenameStyle: 'cobalt-filename-style',
+    audioFormat: 'cobalt-audio-format',
+    audioBitrate: 'cobalt-audio-bitrate',
+    videoQuality: 'cobalt-video-quality',
+    youtubeVideoCodec: 'cobalt-youtube-video-codec',
+    youtubeVideoContainer: 'cobalt-youtube-video-container',
+    localProcessing: 'cobalt-local-processing',
+    subtitleLang: 'cobalt-subtitle-lang',
+    youtubeDubLang: 'cobalt-youtube-dub-lang'
+};
+
+const COBALT_BOOLEAN_FIELDS = {
+    alwaysProxy: 'cobalt-always-proxy',
+    disableMetadata: 'cobalt-disable-metadata',
+    allowH265: 'cobalt-allow-h265',
+    tiktokFullAudio: 'cobalt-tiktok-full-audio',
+    youtubeBetterAudio: 'cobalt-youtube-better-audio',
+    youtubeHLS: 'cobalt-youtube-hls'
+};
+
+const COBALT_BOOLEAN_SELECT_FIELDS = {
+    convertGif: 'cobalt-convert-gif'
+};
+
 function init() {
     setupNavigation();
     setupSectionObserver();
@@ -123,6 +150,7 @@ function setupForms() {
     setupHalationsForm();
     setupBeforeAfterForm();
     setupPanosplitterForm();
+    setupCobaltControls();
     setupCobaltForm();
     setupYtDlpForm();
 }
@@ -368,6 +396,294 @@ function setupPanosplitterForm() {
     });
 }
 
+function setupCobaltControls() {
+    const presetSelect = document.getElementById('cobalt-preset');
+    if (presetSelect) {
+        presetSelect.addEventListener('change', () => {
+            applyCobaltPreset(presetSelect);
+            updateCobaltPresetDescription(presetSelect);
+        });
+        updateCobaltPresetDescription(presetSelect);
+    }
+
+    const customOptionsContainer = document.getElementById('cobalt-custom-options');
+    if (customOptionsContainer) {
+        customOptionsContainer.addEventListener('click', (event) => {
+            const target = event.target;
+            if (target instanceof HTMLElement && target.hasAttribute('data-option-remove')) {
+                const row = target.closest('.cobalt-option-row');
+                if (row) {
+                    row.remove();
+                }
+            }
+        });
+
+        customOptionsContainer.addEventListener('change', (event) => {
+            const target = event.target;
+            if (target instanceof HTMLSelectElement && target.hasAttribute('data-option-type')) {
+                setCobaltOptionPlaceholder(target);
+            }
+        });
+    }
+
+    if (customOptionsContainer && !customOptionsContainer.querySelector('.cobalt-option-row')) {
+        addCobaltOptionRow();
+    }
+
+    const addOptionButton = document.getElementById('cobalt-add-option');
+    if (addOptionButton) {
+        addOptionButton.addEventListener('click', () => addCobaltOptionRow());
+    }
+}
+
+function applyCobaltPreset(select) {
+    if (!(select instanceof HTMLSelectElement)) {
+        return;
+    }
+
+    const option = select.selectedOptions[0];
+    if (!option) {
+        return;
+    }
+
+    const shouldReset = option.dataset.reset !== 'false';
+    let presetValues = {};
+
+    if (shouldReset) {
+        resetCobaltPresetFields();
+    }
+
+    if (option.dataset.options) {
+        try {
+            presetValues = JSON.parse(option.dataset.options);
+        } catch (error) {
+            console.warn('Invalid preset configuration for Cobalt option', error);
+        }
+    }
+
+    const binaryToggle = document.getElementById('cobalt-binary');
+    const filenameField = document.getElementById('cobalt-filename');
+
+    Object.entries(presetValues).forEach(([key, value]) => {
+        if (key === 'response_format' && binaryToggle instanceof HTMLInputElement) {
+            binaryToggle.checked = String(value).toLowerCase() === 'binary';
+            return;
+        }
+
+        if (key === 'download_filename' && filenameField instanceof HTMLInputElement) {
+            filenameField.value = String(value);
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(COBALT_FIELD_IDS, key)) {
+            const fieldId = COBALT_FIELD_IDS[key];
+            const field = document.getElementById(fieldId);
+            if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) {
+                field.value = String(value);
+            }
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(COBALT_BOOLEAN_FIELDS, key)) {
+            const fieldId = COBALT_BOOLEAN_FIELDS[key];
+            const field = document.getElementById(fieldId);
+            if (field instanceof HTMLInputElement) {
+                field.checked = Boolean(value);
+            }
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(COBALT_BOOLEAN_SELECT_FIELDS, key)) {
+            const fieldId = COBALT_BOOLEAN_SELECT_FIELDS[key];
+            const field = document.getElementById(fieldId);
+            if (field instanceof HTMLSelectElement) {
+                if (value === true || value === 'true') {
+                    field.value = 'true';
+                } else if (value === false || value === 'false') {
+                    field.value = 'false';
+                } else {
+                    field.value = '';
+                }
+            }
+        }
+    });
+}
+
+function resetCobaltPresetFields() {
+    Object.values(COBALT_FIELD_IDS).forEach((fieldId) => {
+        const field = document.getElementById(fieldId);
+        if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) {
+            field.value = '';
+        }
+    });
+
+    Object.values(COBALT_BOOLEAN_FIELDS).forEach((fieldId) => {
+        const field = document.getElementById(fieldId);
+        if (field instanceof HTMLInputElement) {
+            field.checked = false;
+        }
+    });
+
+    Object.values(COBALT_BOOLEAN_SELECT_FIELDS).forEach((fieldId) => {
+        const field = document.getElementById(fieldId);
+        if (field instanceof HTMLSelectElement) {
+            field.value = '';
+        }
+    });
+
+    const binaryToggle = document.getElementById('cobalt-binary');
+    if (binaryToggle instanceof HTMLInputElement) {
+        binaryToggle.checked = false;
+    }
+
+    const filenameField = document.getElementById('cobalt-filename');
+    if (filenameField instanceof HTMLInputElement) {
+        filenameField.value = '';
+    }
+}
+
+function updateCobaltPresetDescription(select) {
+    const description = document.getElementById('cobalt-preset-description');
+    if (!(select instanceof HTMLSelectElement) || !description) {
+        return;
+    }
+
+    const option = select.selectedOptions[0];
+    if (option && option.dataset.description) {
+        description.textContent = option.dataset.description;
+        description.hidden = false;
+    } else {
+        description.textContent = '';
+        description.hidden = true;
+    }
+}
+
+function addCobaltOptionRow(key = '', value = '', type = 'string') {
+    const container = document.getElementById('cobalt-custom-options');
+    const template = document.getElementById('cobalt-option-template');
+    if (!container || !(template instanceof HTMLTemplateElement)) {
+        return;
+    }
+
+    const clone = template.content.firstElementChild.cloneNode(true);
+    const keyInput = clone.querySelector('[data-option-key]');
+    const valueInput = clone.querySelector('[data-option-value]');
+    const typeSelect = clone.querySelector('[data-option-type]');
+
+    if (keyInput instanceof HTMLInputElement) {
+        keyInput.value = key;
+    }
+    if (valueInput instanceof HTMLInputElement) {
+        valueInput.value = value;
+    }
+    if (typeSelect instanceof HTMLSelectElement) {
+        if (Array.from(typeSelect.options).some((optionEl) => optionEl.value === type)) {
+            typeSelect.value = type;
+        }
+        setCobaltOptionPlaceholder(typeSelect);
+    }
+
+    container.appendChild(clone);
+}
+
+function setCobaltOptionPlaceholder(typeSelect) {
+    const row = typeSelect.closest('.cobalt-option-row');
+    if (!row) {
+        return;
+    }
+    const valueInput = row.querySelector('[data-option-value]');
+    if (!(valueInput instanceof HTMLInputElement)) {
+        return;
+    }
+
+    const placeholders = {
+        string: 'value',
+        number: '123',
+        boolean: 'true / false',
+        json: '{"key":"value"}'
+    };
+
+    valueInput.placeholder = placeholders[typeSelect.value] || 'value';
+}
+
+function collectCobaltCustomOptions() {
+    const container = document.getElementById('cobalt-custom-options');
+    if (!container) {
+        return {};
+    }
+
+    const options = {};
+    const rows = container.querySelectorAll('.cobalt-option-row');
+
+    rows.forEach((row) => {
+        const keyInput = row.querySelector('[data-option-key]');
+        const valueInput = row.querySelector('[data-option-value]');
+        const typeSelect = row.querySelector('[data-option-type]');
+
+        const key = keyInput instanceof HTMLInputElement ? keyInput.value.trim() : '';
+        const rawValue = valueInput instanceof HTMLInputElement ? valueInput.value.trim() : '';
+        const type = typeSelect instanceof HTMLSelectElement ? typeSelect.value : 'string';
+
+        if (!key && !rawValue) {
+            return;
+        }
+
+        if (!key) {
+            throw new Error('Provide a key for each custom option.');
+        }
+
+        if (!rawValue) {
+            throw new Error(`Provide a value for the custom option "${key}".`);
+        }
+
+        try {
+            options[key] = transformCobaltCustomOptionValue(type, rawValue);
+        } catch (error) {
+            if (error instanceof SyntaxError && type === 'json') {
+                throw new Error(`Custom option "${key}" must be valid JSON.`);
+            }
+            if (error instanceof TypeError) {
+                if (error.message === 'number') {
+                    throw new Error(`Custom option "${key}" must be a valid number.`);
+                }
+                if (error.message === 'boolean') {
+                    throw new Error(`Custom option "${key}" must be 'true' or 'false'.`);
+                }
+            }
+            throw new Error(`Unable to parse the value for custom option "${key}".`);
+        }
+    });
+
+    return options;
+}
+
+function transformCobaltCustomOptionValue(type, rawValue) {
+    if (type === 'number') {
+        const parsed = Number(rawValue);
+        if (Number.isNaN(parsed)) {
+            throw new TypeError('number');
+        }
+        return parsed;
+    }
+
+    if (type === 'boolean') {
+        const normalized = rawValue.toLowerCase();
+        if (['true', '1', 'yes', 'on'].includes(normalized)) {
+            return true;
+        }
+        if (['false', '0', 'no', 'off'].includes(normalized)) {
+            return false;
+        }
+        throw new TypeError('boolean');
+    }
+
+    if (type === 'json') {
+        return JSON.parse(rawValue);
+    }
+
+    return rawValue;
+}
+
 function setupCobaltForm() {
     attachSubmit('cobalt-form', async () => {
         const urlField = document.getElementById('cobalt-url');
@@ -393,8 +709,9 @@ function setupCobaltForm() {
             }
         }
 
+        const customOptions = collectCobaltCustomOptions();
+
         const payload = {
-            ...(extraPayload || {}),
             url: urlValue,
             response_format: binaryToggle.checked ? 'binary' : 'json'
         };
@@ -402,6 +719,42 @@ function setupCobaltForm() {
         const filenameOverride = filenameField.value.trim();
         if (filenameOverride) {
             payload.download_filename = filenameOverride;
+        }
+
+        Object.entries(COBALT_FIELD_IDS).forEach(([key, fieldId]) => {
+            const field = document.getElementById(fieldId);
+            if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) {
+                const value = field.value.trim();
+                if (value) {
+                    payload[key] = value;
+                }
+            }
+        });
+
+        Object.entries(COBALT_BOOLEAN_FIELDS).forEach(([key, fieldId]) => {
+            const field = document.getElementById(fieldId);
+            if (field instanceof HTMLInputElement && field.checked) {
+                payload[key] = true;
+            }
+        });
+
+        Object.entries(COBALT_BOOLEAN_SELECT_FIELDS).forEach(([key, fieldId]) => {
+            const field = document.getElementById(fieldId);
+            if (field instanceof HTMLSelectElement) {
+                if (field.value === 'true') {
+                    payload[key] = true;
+                } else if (field.value === 'false') {
+                    payload[key] = false;
+                }
+            }
+        });
+
+        if (customOptions && Object.keys(customOptions).length) {
+            Object.assign(payload, customOptions);
+        }
+
+        if (extraPayload && Object.keys(extraPayload).length) {
+            Object.assign(payload, extraPayload);
         }
 
         const response = await fetch('/js-tools/cobalt', {

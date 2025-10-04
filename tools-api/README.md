@@ -108,7 +108,7 @@ export COBALT_API_TIMEOUT="90"
 
 Once configured you can `POST /js-tools/cobalt` with any options supported by Cobalt's schema (for example `audioFormat`, `videoQuality`, or service-specific flags). Default responses return the raw JSON from Cobalt. Include `{"response_format": "binary"}` to download the media bytes directly via Tools API.
 
-> Tip: Tools API Studio ships with a dedicated Cobalt card so you can paste a URL, toggle binary responses, override filenames, and send raw JSON payloads without crafting curl commands.
+> Tip: Tools API Studio ships with a dedicated Cobalt card so you can paste a URL, mix and match presets, tweak audio/video formats, toggle service-specific flags, add custom key/value pairs, or fall back to raw JSON—no curl gymnastics required.
 
 #### yt-dlp media helper
 Tools API now ships with a thin wrapper around [yt-dlp](https://github.com/yt-dlp/yt-dlp) for quick metadata lookups or direct downloads:
