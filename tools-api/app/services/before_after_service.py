@@ -118,12 +118,10 @@ class BeforeAfterService:
     ) -> Tuple[bytes, str, str, str]:
         """Encode the generated frames using the best available backend."""
 
-        encoders: List[Callable[[List[np.ndarray]], Tuple[bytes, str, str, str]]] = []
-
-        if self._ffmpeg_available():
-            encoders.append(self._encode_with_ffmpeg)
-
-        encoders.append(self._encode_with_gif)
+        encoders: List[Callable[[List[np.ndarray]], Tuple[bytes, str, str, str]]] = [
+            self._encode_with_ffmpeg,
+            self._encode_with_gif,
+        ]
 
         last_error: Exception | None = None
         for encoder in encoders:
@@ -138,23 +136,6 @@ class BeforeAfterService:
         raise BeforeAfterError(
             "Failed to encode animation using the available backends."
         ) from last_error
-
-    @classmethod
-    def _ffmpeg_available(cls) -> bool:
-        """Detect whether the optional imageio-ffmpeg dependency is importable."""
-
-        if cls._ffmpeg_support is None:
-            try:
-                import imageio_ffmpeg  # noqa: F401
-            except ImportError:
-                cls._ffmpeg_support = False
-                logger.info(
-                    "imageio-ffmpeg is not installed; GIF output will be used for before/after animations"
-                )
-            else:
-                cls._ffmpeg_support = True
-
-        return bool(cls._ffmpeg_support)
 
     def _encode_with_ffmpeg(
         self, frames: List[np.ndarray]
