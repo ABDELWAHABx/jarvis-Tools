@@ -1,7 +1,11 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from app.routers import docx, gdocs_parser, image_tools, js_tools, media, parser
 from app.extensions import local_queue_extension
 from app.utils.logger import logger
@@ -10,10 +14,17 @@ import time
 
 
 app = FastAPI(
-    title="Tools API", 
+    title="Tools API",
     version="1.0.0",
     description="API for document parsing, DOCX manipulation, and n8n integrations"
 )
+
+
+# Static and template configuration
+BASE_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+static_dir = BASE_DIR / "static"
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 # Middleware - CORS
@@ -115,13 +126,27 @@ async def health():
     }
 
 
-# Root endpoint
-@app.get("/", tags=["system"])
-async def root():
-    """API root with basic info."""
+# Root HTML studio
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def studio(request: Request):
+    """Serve the interactive Tools API Studio dashboard."""
+    return templates.TemplateResponse(
+        "studio.html",
+        {
+            "request": request,
+            "docs_url": app.docs_url or "/docs",
+            "openapi_url": app.openapi_url or "/openapi.json",
+            "version": app.version or "",
+        },
+    )
+
+
+@app.get("/api", tags=["system"])
+async def root_metadata():
+    """API metadata endpoint kept for backwards compatibility."""
     return {
         "message": "Tools API",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/health"
+        "version": app.version,
+        "docs": app.docs_url,
+        "health": "/health",
     }

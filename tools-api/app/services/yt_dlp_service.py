@@ -39,6 +39,13 @@ def _ensure_yt_dlp() -> Any:
     return yt_dlp
 
 
+def ensure_media_tools_ready() -> None:
+    """Confirm that yt-dlp is importable for media tooling."""
+
+    _ensure_yt_dlp()
+    logger.info("yt-dlp dependency is available")
+
+
 class YtDlpService:
     """Thin wrapper around yt-dlp with opinionated defaults."""
 

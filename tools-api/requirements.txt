@@ -1,5 +1,6 @@
 beautifulsoup4
 fastapi
+jinja2
 httpx
 markdown
 pydantic
