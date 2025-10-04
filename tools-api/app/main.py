@@ -38,6 +38,29 @@ static_dir = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+def _resolve_app_url(request: Request, value: str | None, fallback: str) -> str:
+    """Resolve application URLs so they respect any configured root path."""
+
+    candidate = value or fallback
+    if not candidate:
+        return ""
+
+    parsed = urlparse(candidate)
+    if parsed.scheme or candidate.startswith("//"):
+        return candidate
+
+    root_path = (request.scope.get("root_path") or "").rstrip("/")
+    if not root_path:
+        return candidate
+
+    if candidate.startswith("/"):
+        if candidate.startswith(f"{root_path}/"):
+            return candidate
+        return f"{root_path}{candidate}"
+
+    return f"{root_path}/{candidate}"
+
+
 # Middleware - CORS
 app.add_middleware(
     CORSMiddleware,
@@ -200,12 +223,15 @@ async def studio(request: Request):
         for shortcut in list_shortcuts()
     ]
 
+    docs_url = _resolve_app_url(request, app.docs_url, "/docs")
+    openapi_url = _resolve_app_url(request, app.openapi_url, "/openapi.json")
+
     return templates.TemplateResponse(
         "studio.html",
         {
             "request": request,
-            "docs_url": app.docs_url or "/docs",
-            "openapi_url": app.openapi_url or "/openapi.json",
+            "docs_url": docs_url,
+            "openapi_url": openapi_url,
             "version": app.version or "",
             "cobalt_status": {
                 "configured": configured,
