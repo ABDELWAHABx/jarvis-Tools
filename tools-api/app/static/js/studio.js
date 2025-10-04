@@ -1505,9 +1505,10 @@ function renderYtDlpResults(args = {}) {
         summaryNodes.push(createMetaGrid(summaryMeta));
     }
 
-    if (metadata.thumbnail) {
+    const thumbnailUrl = selectBestThumbnail(metadata);
+    if (thumbnailUrl) {
         const thumbnail = document.createElement('img');
-        thumbnail.src = metadata.thumbnail;
+        thumbnail.src = thumbnailUrl;
         thumbnail.alt = metadata.title ? `${metadata.title} thumbnail` : 'Media thumbnail';
         summaryNodes.push(thumbnail);
     }
@@ -1583,6 +1584,39 @@ function setDownloadButtonsState(enabled) {
     }
 }
 
+function selectBestThumbnail(metadata) {
+    if (!metadata || typeof metadata !== 'object') {
+        return null;
+    }
+
+    if (metadata.thumbnail && typeof metadata.thumbnail === 'string') {
+        return metadata.thumbnail;
+    }
+
+    if (!Array.isArray(metadata.thumbnails)) {
+        return null;
+    }
+
+    const sorted = metadata.thumbnails
+        .filter((entry) => entry && typeof entry.url === 'string')
+        .map((entry) => ({
+            url: entry.url,
+            width: Number(entry.width) || 0,
+            height: Number(entry.height) || 0,
+        }))
+        .filter((entry) => entry.url.length)
+        .sort((a, b) => {
+            const aScore = (a.width || 0) * (a.height || 0);
+            const bScore = (b.width || 0) * (b.height || 0);
+            if (aScore === bScore) {
+                return (b.width || 0) - (a.width || 0);
+            }
+            return bScore - aScore;
+        });
+
+    return sorted.length ? sorted[0].url : null;
+}
+
 function buildYtDlpDownloadNodes(download) {
     if (!download) {
         return [];
@@ -1595,6 +1629,11 @@ function buildYtDlpDownloadNodes(download) {
     const nodes = [];
 
     if (download.blob) {
+        const preview = createMediaPreviewFromBlob(download.blob, download.contentType, download.filename);
+        if (preview) {
+            nodes.push(preview);
+        }
+
         const label = download.blobLabel || 'Download media';
         nodes.push(createDownloadLinkFromBlob(download.blob, download.filename, label));
     }
@@ -1615,6 +1654,43 @@ function buildYtDlpDownloadNodes(download) {
     }
 
     return nodes;
+}
+
+function createMediaPreviewFromBlob(blob, contentType, filename) {
+    if (!blob) {
+        return null;
+    }
+
+    const mimeType = (contentType || blob.type || '').toLowerCase();
+    const isVideo = mimeType.startsWith('video/');
+    const isAudio = mimeType.startsWith('audio/');
+
+    if (!isVideo && !isAudio) {
+        return null;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'media-preview';
+    wrapper.dataset.objectUrl = url;
+
+    const mediaElement = document.createElement(isVideo ? 'video' : 'audio');
+    mediaElement.controls = true;
+    mediaElement.preload = 'metadata';
+    mediaElement.src = url;
+    mediaElement.className = isVideo ? 'media-preview__video' : 'media-preview__audio';
+    mediaElement.title = filename ? `Preview: ${filename}` : 'Media preview';
+
+    wrapper.appendChild(mediaElement);
+
+    const helper = document.createElement('p');
+    helper.className = 'helper-text';
+    helper.textContent = isVideo
+        ? 'Preview the downloaded video without leaving the page.'
+        : 'Preview the downloaded audio without leaving the page.';
+    wrapper.appendChild(helper);
+
+    return wrapper;
 }
 
 function openYtDlpModal() {
@@ -1869,10 +1945,12 @@ async function handleYtDlpDownload(formatId) {
             buildFilenameFromMetadata(ytDlpState.metadata, selectedFormat);
 
         const directUrl = buildDirectDownloadUrl({ url: payload.url, format: formatId, filename });
+        const contentType = response.headers.get('Content-Type') || undefined;
         const downloadState = {
             blob,
             filename,
             blobLabel: 'Download media',
+            contentType,
             directUrl,
             directLabel: 'Open API download link'
         };
@@ -2202,10 +2280,33 @@ async function parseBinaryResponse(response) {
 }
 
 async function fetchBinaryWithProgress(url, options, onProgress) {
-    const response = await fetch(url, options);
+    let response;
+    try {
+        response = await fetch(url, options);
+    } catch (error) {
+        throw new Error('Network error while fetching media. Please try again.');
+    }
+
     if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
+        let message = '';
+        const contentType = response.headers.get('Content-Type') || '';
+        if (contentType.includes('application/json')) {
+            try {
+                const payload = await response.clone().json();
+                if (payload && typeof payload.detail === 'string') {
+                    message = payload.detail;
+                }
+            } catch (error) {
+                // fall through to text handling
+            }
+        }
+
+        if (!message) {
+            const text = await response.text();
+            message = text && text.trim() ? text : `Request failed (${response.status})`;
+        }
+
+        throw new Error(message);
     }
 
     const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
