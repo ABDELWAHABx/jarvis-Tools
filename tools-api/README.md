@@ -106,9 +106,20 @@ export COBALT_API_AUTH_TOKEN="your-token"
 export COBALT_API_TIMEOUT="90"
 ```
 
+If `COBALT_API_BASE_URL` is omitted, Tools API automatically proxies through the public `https://co.wuk.sh/api/json` endpoint so you can test downloads out of the box. Set `COBALT_API_BASE_URL=disabled` when you want to turn the integration off entirely.
+
 Once configured you can `POST /js-tools/cobalt` with any options supported by Cobalt's schema (for example `audioFormat`, `videoQuality`, or service-specific flags). Default responses return the raw JSON from Cobalt. Include `{"response_format": "binary"}` to download the media bytes directly via Tools API.
 
 > Tip: Tools API Studio ships with a dedicated Cobalt card so you can paste a URL, mix and match presets, tweak audio/video formats, toggle service-specific flags, add custom key/value pairs, or fall back to raw JSON—no curl gymnastics required.
+
+Need an even faster hand-off for automations? Use the shortcut endpoints:
+
+- `POST /js-tools/cobalt/shortcuts/youtube-audio` – 320 kbps MP3 download.
+- `POST /js-tools/cobalt/shortcuts/youtube-video` – 1080p H.264 MP4 download.
+- `POST /js-tools/cobalt/shortcuts/instagram-story` – Instagram reels/stories as MP4.
+- `POST /js-tools/cobalt/shortcuts/metadata-only` – Fetch the JSON manifest without downloading media.
+
+Each shortcut accepts the same JSON body as `/js-tools/cobalt` (at minimum a `url`) and honours `response_format` (`json` or `binary`) plus `download_filename` for binary requests. These routes are ideal for n8n, Tasker, or webhook automations that just need a ready-to-use media URL or stream.
 
 #### yt-dlp media helper
 Tools API now ships with a thin wrapper around [yt-dlp](https://github.com/yt-dlp/yt-dlp) for quick metadata lookups or direct downloads:

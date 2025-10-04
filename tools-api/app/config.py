@@ -6,6 +6,9 @@ workable in environments with different pydantic versions.
 import os
 
 
+DEFAULT_COBALT_BASE_URL = "https://co.wuk.sh/api/json"
+
+
 class Settings:
     API_KEY: str
     GOOGLE_DOCS_API_URL: str
@@ -14,12 +17,24 @@ class Settings:
     COBALT_API_AUTH_SCHEME: str
     COBALT_API_AUTH_TOKEN: str
     COBALT_API_TIMEOUT: float
+    COBALT_API_BASE_URL_FALLBACK: bool
 
     def __init__(self):
         self.API_KEY = os.getenv("API_KEY", "")
         self.GOOGLE_DOCS_API_URL = os.getenv("GOOGLE_DOCS_API_URL", "")
         self.DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes")
-        self.COBALT_API_BASE_URL = os.getenv("COBALT_API_BASE_URL", "")
+
+        raw_cobalt_url = os.getenv("COBALT_API_BASE_URL", "").strip()
+        if raw_cobalt_url.lower() == "disabled":
+            self.COBALT_API_BASE_URL = ""
+            self.COBALT_API_BASE_URL_FALLBACK = False
+        elif raw_cobalt_url:
+            self.COBALT_API_BASE_URL = raw_cobalt_url
+            self.COBALT_API_BASE_URL_FALLBACK = False
+        else:
+            self.COBALT_API_BASE_URL = DEFAULT_COBALT_BASE_URL
+            self.COBALT_API_BASE_URL_FALLBACK = True
+
         self.COBALT_API_AUTH_SCHEME = os.getenv("COBALT_API_AUTH_SCHEME", "")
         self.COBALT_API_AUTH_TOKEN = os.getenv("COBALT_API_AUTH_TOKEN", "")
         self.COBALT_API_TIMEOUT = float(os.getenv("COBALT_API_TIMEOUT", "60"))
