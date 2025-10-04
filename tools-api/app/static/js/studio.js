@@ -9,7 +9,11 @@ const ytDlpState = {
     dom: {},
     lastTemplate: 'best',
     modalKeyListener: null,
-    selectedFormatId: null
+    selectedFormatId: null,
+    subtitleLanguageFilter: 'en',
+    downloadNodes: null,
+    downloadProgress: null,
+    downloadProgressTimer: null
 };
 
 const COBALT_FIELD_IDS = {
@@ -37,6 +41,17 @@ const COBALT_BOOLEAN_FIELDS = {
 
 const COBALT_BOOLEAN_SELECT_FIELDS = {
     convertGif: 'cobalt-convert-gif'
+};
+
+const languageDisplayNames =
+    typeof Intl !== 'undefined' && typeof Intl.DisplayNames === 'function'
+        ? new Intl.DisplayNames(['en'], { type: 'language' })
+        : null;
+
+const YT_DLP_SHORTCUT_LABELS = {
+    best: 'Best available',
+    fhd: '1080p video',
+    audio: 'Audio only'
 };
 
 function init() {
@@ -831,6 +846,10 @@ function setupYtDlpForm() {
     const qualityList = document.getElementById('yt-dlp-quality-list');
     const modalDownloadButton = document.getElementById('yt-dlp-modal-download');
     const modalCloseButton = document.getElementById('yt-dlp-modal-close');
+    const progressContainer = document.getElementById('yt-dlp-progress');
+    const progressLabel = document.getElementById('yt-dlp-progress-label');
+    const progressPercent = document.getElementById('yt-dlp-progress-percent');
+    const progressIndicator = document.getElementById('yt-dlp-progress-indicator');
 
     ytDlpState.dom = {
         form,
@@ -849,7 +868,11 @@ function setupYtDlpForm() {
         modal,
         modalSubtitle,
         qualityList,
-        modalDownloadButton
+        modalDownloadButton,
+        progressContainer,
+        progressLabel,
+        progressPercent,
+        progressIndicator
     };
 
     const templatePresets = {
@@ -1064,18 +1087,59 @@ function buildYtDlpPayload(responseFormat, overrides = {}) {
     return payload;
 }
 
-function renderYtDlpResults({ metadata, raw, download } = {}) {
+function renderYtDlpResults(args = {}) {
+    let { metadata, raw, download } = args;
+    const previousMetadata = ytDlpState.metadata;
+
+    if (metadata) {
+        ytDlpState.metadata = metadata;
+    } else if (previousMetadata) {
+        metadata = previousMetadata;
+    }
+
     if (!metadata) {
+        ytDlpState.metadata = null;
+        ytDlpState.rawResponse = null;
+        ytDlpState.downloadNodes = null;
         setResult('media-results', []);
         setDownloadButtonsState(false);
         return;
     }
 
+    const isNewMetadata = metadata !== previousMetadata;
+
+    if (raw) {
+        ytDlpState.rawResponse = raw;
+    } else if (ytDlpState.rawResponse) {
+        raw = ytDlpState.rawResponse;
+    }
+
+    if (download !== undefined) {
+        ytDlpState.downloadNodes = download;
+    } else if (isNewMetadata) {
+        ytDlpState.downloadNodes = null;
+        download = null;
+    } else {
+        download = ytDlpState.downloadNodes;
+    }
+
     const hasFormats = Array.isArray(metadata.formats) && metadata.formats.length > 0;
     const groups = [];
     const summaryNodes = [];
-
     const summaryMeta = {};
+
+    const subtitleLanguages = collectSubtitleLanguages(metadata);
+
+    if (isNewMetadata) {
+        ytDlpState.subtitleLanguageFilter = selectInitialSubtitleFilter(subtitleLanguages);
+    } else if (
+        subtitleLanguages.length &&
+        ytDlpState.subtitleLanguageFilter !== 'all' &&
+        !subtitleLanguages.includes(ytDlpState.subtitleLanguageFilter)
+    ) {
+        ytDlpState.subtitleLanguageFilter = selectInitialSubtitleFilter(subtitleLanguages);
+    }
+
     if (metadata.title) {
         summaryMeta.Title = metadata.title;
     }
@@ -1119,12 +1183,26 @@ function renderYtDlpResults({ metadata, raw, download } = {}) {
     chooseButton.addEventListener('click', () => openYtDlpModal());
     actions.appendChild(chooseButton);
 
+    if (subtitleLanguages.length > 1) {
+        const subtitleFilter = createSubtitleFilterControl(subtitleLanguages, ytDlpState.subtitleLanguageFilter);
+        if (subtitleFilter) {
+            actions.appendChild(subtitleFilter);
+        }
+    }
+
     const helper = document.createElement('p');
     helper.className = 'helper-text';
     helper.textContent = hasFormats
         ? 'Pick a quality to download or try a different recipe from the dropdown above.'
         : 'No downloadable formats were reported, but raw metadata is available below.';
     actions.appendChild(helper);
+
+    if (raw && raw.shortcuts) {
+        const shortcuts = createShortcutLinks(raw.shortcuts);
+        if (shortcuts) {
+            actions.appendChild(shortcuts);
+        }
+    }
 
     summaryNodes.push(actions);
 
@@ -1139,9 +1217,19 @@ function renderYtDlpResults({ metadata, raw, download } = {}) {
         groups.push(createResultGroup('Raw metadata', [createPre(rawPayload)]));
     }
 
-    const subtitleGroups = buildSubtitleGroups(metadata);
-    if (subtitleGroups.length) {
-        groups.push(...subtitleGroups);
+    if (subtitleLanguages.length) {
+        const selectedLanguage = ytDlpState.subtitleLanguageFilter || selectInitialSubtitleFilter(subtitleLanguages);
+        const subtitleGroups = buildSubtitleGroups(metadata, selectedLanguage);
+        if (subtitleGroups.length) {
+            groups.push(...subtitleGroups);
+        } else {
+            const message = document.createElement('p');
+            message.textContent =
+                selectedLanguage === 'all'
+                    ? 'No subtitle tracks were reported for this media.'
+                    : `No subtitles were reported for the selected language (${selectedLanguage.toUpperCase()}).`;
+            groups.push(createResultGroup('Subtitles', [message]));
+        }
     }
 
     setResult('media-results', groups);
@@ -1383,15 +1471,19 @@ async function handleYtDlpDownload(formatId) {
             throw new Error('Select a valid format to download.');
         }
         const payload = buildYtDlpPayload('binary', { formatOverride: formatId });
-        const response = await fetch('/media/yt-dlp', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
+        startYtDlpDownloadProgress();
+        const { blob, response } = await fetchBinaryWithProgress(
+            '/media/yt-dlp',
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
             },
-            body: JSON.stringify(payload)
-        });
-
-        const blob = await parseBinaryResponse(response);
+            (loaded, total) => updateYtDlpDownloadProgress(loaded, total)
+        );
+        completeYtDlpDownloadProgress('Download ready');
         const selectedFormat = ytDlpState.formatsById.get(formatId) || null;
         const filename =
             payload.filename ||
@@ -1400,6 +1492,12 @@ async function handleYtDlpDownload(formatId) {
 
         const downloadLink = createDownloadLinkFromBlob(blob, filename, 'Download media');
         const downloadNodes = [downloadLink];
+
+        const directUrl = buildDirectDownloadUrl({ url: payload.url, format: formatId, filename });
+        const directLink = createDownloadLinkFromUrl(directUrl, 'Open API download link');
+        if (directLink) {
+            downloadNodes.push(directLink);
+        }
 
         if (selectedFormat) {
             const downloadMeta = {};
@@ -1423,6 +1521,7 @@ async function handleYtDlpDownload(formatId) {
         showToast('Media download ready.');
     } catch (error) {
         console.error(error);
+        failYtDlpDownloadProgress(error.message || 'Download failed');
         showToast(error.message || 'Download failed', 'error');
         return;
     } finally {
@@ -1706,6 +1805,196 @@ async function parseBinaryResponse(response) {
     return response.blob();
 }
 
+async function fetchBinaryWithProgress(url, options, onProgress) {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Request failed (${response.status})`);
+    }
+
+    const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
+    const contentLengthHeader = response.headers.get('Content-Length');
+    const contentLength = contentLengthHeader ? Number(contentLengthHeader) : null;
+
+    if (!response.body || typeof response.body.getReader !== 'function') {
+        const blob = await response.blob();
+        if (typeof onProgress === 'function') {
+            const size = blob.size;
+            onProgress(size, contentLength || size || null);
+        }
+        return { blob, response };
+    }
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        if (value) {
+            chunks.push(value);
+            received += value.byteLength;
+            if (typeof onProgress === 'function') {
+                onProgress(received, contentLength);
+            }
+        }
+    }
+
+    if (typeof onProgress === 'function') {
+        onProgress(received, contentLength);
+    }
+
+    const blob = new Blob(chunks, { type: contentType });
+    return { blob, response };
+}
+
+function startYtDlpDownloadProgress() {
+    cancelYtDlpProgressReset();
+    ytDlpState.downloadProgress = { status: 'active', loaded: 0, total: null };
+    renderYtDlpProgress();
+}
+
+function updateYtDlpDownloadProgress(loaded, total) {
+    if (!ytDlpState.downloadProgress) {
+        startYtDlpDownloadProgress();
+    }
+    const progress = ytDlpState.downloadProgress;
+    progress.status = 'active';
+    progress.loaded = Number.isFinite(loaded) && loaded >= 0 ? loaded : 0;
+    if (Number.isFinite(total) && total > 0) {
+        progress.total = total;
+    }
+    renderYtDlpProgress();
+}
+
+function completeYtDlpDownloadProgress(message) {
+    if (!ytDlpState.downloadProgress) {
+        return;
+    }
+    const progress = ytDlpState.downloadProgress;
+    progress.status = 'complete';
+    if (!Number.isFinite(progress.total) || progress.total <= 0) {
+        progress.total = progress.loaded;
+    }
+    progress.message = message || 'Download ready';
+    renderYtDlpProgress();
+    scheduleYtDlpProgressReset(2400);
+}
+
+function failYtDlpDownloadProgress(message) {
+    ytDlpState.downloadProgress = ytDlpState.downloadProgress || { loaded: 0, total: null };
+    const progress = ytDlpState.downloadProgress;
+    progress.status = 'error';
+    progress.message = message || 'Download failed';
+    renderYtDlpProgress();
+    scheduleYtDlpProgressReset(3200);
+}
+
+function scheduleYtDlpProgressReset(delay = 2400) {
+    cancelYtDlpProgressReset();
+    ytDlpState.downloadProgressTimer = window.setTimeout(() => {
+        clearYtDlpDownloadProgress();
+    }, delay);
+}
+
+function cancelYtDlpProgressReset() {
+    if (ytDlpState.downloadProgressTimer) {
+        window.clearTimeout(ytDlpState.downloadProgressTimer);
+        ytDlpState.downloadProgressTimer = null;
+    }
+}
+
+function clearYtDlpDownloadProgress() {
+    cancelYtDlpProgressReset();
+    const dom = ytDlpState.dom || {};
+    ytDlpState.downloadProgress = null;
+    if (dom.progressContainer) {
+        dom.progressContainer.hidden = true;
+        dom.progressContainer.classList.remove('is-indeterminate', 'is-error', 'is-complete');
+    }
+    if (dom.progressIndicator) {
+        dom.progressIndicator.style.width = '0';
+    }
+    if (dom.progressLabel) {
+        dom.progressLabel.textContent = '';
+    }
+    if (dom.progressPercent) {
+        dom.progressPercent.textContent = '';
+    }
+}
+
+function renderYtDlpProgress() {
+    const dom = ytDlpState.dom || {};
+    const container = dom.progressContainer;
+    if (!container) {
+        return;
+    }
+
+    const progress = ytDlpState.downloadProgress;
+    if (!progress) {
+        container.hidden = true;
+        return;
+    }
+
+    container.hidden = false;
+
+    const status = progress.status || 'active';
+    const loaded = Number(progress.loaded) || 0;
+    const total = Number(progress.total);
+    const hasTotal = Number.isFinite(total) && total > 0;
+
+    let labelText = progress.message || '';
+    let percentText = '';
+    let width = null;
+
+    if (status === 'error') {
+        labelText = progress.message || 'Download failed';
+        width = 100;
+    } else if (status === 'complete') {
+        const totalLabel = hasTotal ? formatBytes(total) : null;
+        const fallbackLabel = formatBytes(loaded) || `${loaded} bytes`;
+        labelText = progress.message || `Downloaded ${totalLabel || fallbackLabel}`;
+        percentText = '100%';
+        width = 100;
+    } else {
+        const loadedLabel = formatBytes(loaded) || `${loaded} bytes`;
+        if (hasTotal) {
+            const totalLabel = formatBytes(total) || `${total} bytes`;
+            const percent = total ? Math.min(100, Math.max(0, Math.round((loaded / total) * 100))) : 0;
+            percentText = `${percent}%`;
+            labelText = progress.message || `Downloading… ${loadedLabel} / ${totalLabel}`;
+            width = percent;
+        } else {
+            labelText = progress.message || `Downloading… ${loadedLabel}`;
+        }
+    }
+
+    container.classList.toggle('is-indeterminate', status === 'active' && !hasTotal);
+    container.classList.toggle('is-error', status === 'error');
+    container.classList.toggle('is-complete', status === 'complete');
+
+    if (dom.progressLabel) {
+        dom.progressLabel.textContent = labelText;
+    }
+    if (dom.progressPercent) {
+        dom.progressPercent.textContent = percentText;
+    }
+    if (dom.progressIndicator) {
+        if (status === 'active' && !hasTotal) {
+            dom.progressIndicator.style.width = '40%';
+        } else if (typeof width === 'number') {
+            dom.progressIndicator.style.width = `${width}%`;
+        } else if (status === 'error') {
+            dom.progressIndicator.style.width = '100%';
+        } else {
+            dom.progressIndicator.style.width = '0';
+        }
+    }
+}
+
 function extractMessage(payload, status) {
     if (!payload) {
         return `Request failed (${status})`;
@@ -1793,7 +2082,138 @@ function createMetaGrid(meta) {
     return grid;
 }
 
-function buildSubtitleGroups(metadata) {
+function collectSubtitleLanguages(metadata) {
+    if (!metadata || typeof metadata !== 'object') {
+        return [];
+    }
+    const sources = ['requested_subtitles', 'automatic_captions', 'subtitles'];
+    const languages = new Set();
+    sources.forEach((key) => {
+        const entries = metadata[key];
+        if (!entries || typeof entries !== 'object' || Array.isArray(entries)) {
+            return;
+        }
+        Object.keys(entries).forEach((code) => {
+            const normalised = normaliseLanguageCode(code);
+            if (normalised) {
+                languages.add(normalised);
+            }
+        });
+    });
+    return Array.from(languages).sort(sortLanguageCodes);
+}
+
+function normaliseLanguageCode(code) {
+    if (!code) {
+        return '';
+    }
+    return String(code)
+        .toLowerCase()
+        .replace(/_/g, '-')
+        .split('-')[0]
+        .trim();
+}
+
+function selectInitialSubtitleFilter(languages) {
+    if (!Array.isArray(languages) || !languages.length) {
+        return 'all';
+    }
+    if (languages.includes('en')) {
+        return 'en';
+    }
+    return languages[0];
+}
+
+function createSubtitleFilterControl(languages, selected) {
+    if (!Array.isArray(languages) || !languages.length) {
+        return null;
+    }
+    const wrapper = document.createElement('div');
+    wrapper.className = 'yt-dlp-subtitle-filter';
+
+    const label = document.createElement('span');
+    label.textContent = 'Subtitle language';
+    wrapper.appendChild(label);
+
+    const select = document.createElement('select');
+    const available = ['all', ...languages];
+    available.forEach((code) => {
+        const option = document.createElement('option');
+        option.value = code;
+        option.textContent = createLanguageOptionLabel(code);
+        select.appendChild(option);
+    });
+
+    const initial = available.includes(selected) ? selected : available[0];
+    select.value = initial;
+
+    select.addEventListener('change', (event) => {
+        const value = event.target.value || 'all';
+        ytDlpState.subtitleLanguageFilter = value;
+        renderYtDlpResults();
+    });
+
+    wrapper.appendChild(select);
+    return wrapper;
+}
+
+function createLanguageOptionLabel(code) {
+    if (code === 'all') {
+        return 'All languages';
+    }
+    const label = formatLanguageLabel(code);
+    return label ? label : code.toUpperCase();
+}
+
+function formatLanguageLabel(code) {
+    if (!code) {
+        return '';
+    }
+    const normalised = normaliseLanguageCode(code);
+    if (!normalised) {
+        return String(code).toUpperCase();
+    }
+    let label = '';
+    if (languageDisplayNames) {
+        try {
+            label = languageDisplayNames.of(normalised) || '';
+        } catch (error) {
+            label = '';
+        }
+    }
+    const formattedCode = String(code).toUpperCase();
+    if (label && label.toLowerCase() !== normalised) {
+        return `${label} (${formattedCode})`;
+    }
+    if (label) {
+        return `${label} (${normalised.toUpperCase()})`;
+    }
+    return formattedCode;
+}
+
+function matchesLanguageFilter(languageCode, filter) {
+    if (!filter || filter === 'all') {
+        return true;
+    }
+    return normaliseLanguageCode(languageCode) === filter;
+}
+
+function sortLanguageCodes(a, b) {
+    const aCode = normaliseLanguageCode(a);
+    const bCode = normaliseLanguageCode(b);
+    if (aCode === bCode) {
+        return a.localeCompare(b);
+    }
+    if (aCode === 'en') {
+        return -1;
+    }
+    if (bCode === 'en') {
+        return 1;
+    }
+    return aCode.localeCompare(bCode);
+}
+
+function buildSubtitleGroups(metadata, languageFilter) {
     if (!metadata || typeof metadata !== 'object') {
         return [];
     }
@@ -1810,7 +2230,7 @@ function buildSubtitleGroups(metadata) {
             if (!entries || typeof entries !== 'object' || Array.isArray(entries)) {
                 return null;
             }
-            const list = createSubtitleList(entries);
+            const list = createSubtitleList(entries, languageFilter);
             if (!list) {
                 return null;
             }
@@ -1819,11 +2239,19 @@ function buildSubtitleGroups(metadata) {
         .filter(Boolean);
 }
 
-function createSubtitleList(entries) {
-    const languages = Object.keys(entries || {});
+function createSubtitleList(entries, languageFilter) {
+    let languages = Object.keys(entries || {});
     if (!languages.length) {
         return null;
     }
+
+    languages = languages.filter((code) => matchesLanguageFilter(code, languageFilter));
+    if (!languages.length) {
+        return null;
+    }
+
+    languages.sort(sortLanguageCodes);
+
     const wrapper = document.createElement('div');
     wrapper.className = 'subtitle-list';
 
@@ -1833,7 +2261,7 @@ function createSubtitleList(entries) {
 
         const langBadge = document.createElement('span');
         langBadge.className = 'subtitle-lang';
-        langBadge.textContent = lang;
+        langBadge.textContent = formatLanguageLabel(lang);
         row.appendChild(langBadge);
 
         const details = document.createElement('div');
@@ -1863,9 +2291,6 @@ function createSubtitleList(entries) {
             }
 
             if (value.url) {
-                if (details.childNodes.length) {
-                    details.appendChild(document.createTextNode(' '));
-                }
                 const link = document.createElement('a');
                 link.href = value.url;
                 link.target = '_blank';
@@ -1889,6 +2314,55 @@ function createSubtitleList(entries) {
     });
 
     return wrapper;
+}
+
+function createShortcutLinks(shortcuts) {
+    const entries = Object.entries(shortcuts || {}).filter(([, href]) => typeof href === 'string' && href.length);
+    if (!entries.length) {
+        return null;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'yt-dlp-shortcuts';
+
+    const label = document.createElement('span');
+    label.textContent = 'Quick API links';
+    wrapper.appendChild(label);
+
+    entries.forEach(([key, href]) => {
+        const link = document.createElement('a');
+        link.href = toAbsoluteUrl(href);
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        const label = YT_DLP_SHORTCUT_LABELS[key] || key;
+        link.textContent = label;
+        link.title = `Download using the ${label.toLowerCase()} preset`;
+        wrapper.appendChild(link);
+    });
+
+    return wrapper;
+}
+
+function toAbsoluteUrl(href) {
+    if (!href) {
+        return '';
+    }
+    try {
+        return new URL(href, window.location.origin).toString();
+    } catch (error) {
+        return href;
+    }
+}
+
+function buildDirectDownloadUrl({ url, format, filename }) {
+    if (!url || !format) {
+        return null;
+    }
+    const params = new URLSearchParams({ url, format });
+    if (filename) {
+        params.set('filename', filename);
+    }
+    return `/media/yt-dlp/direct?${params.toString()}`;
 }
 
 function formatBytes(bytes) {
@@ -1994,6 +2468,19 @@ function createDownloadLinkFromBlob(blob, filename, label = 'Download') {
         },
         { once: true }
     );
+    return link;
+}
+
+function createDownloadLinkFromUrl(href, label = 'Open download link') {
+    if (!href) {
+        return null;
+    }
+    const link = document.createElement('a');
+    link.href = toAbsoluteUrl(href);
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    link.className = 'download-link is-outline';
+    link.textContent = label;
     return link;
 }
 
