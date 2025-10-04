@@ -200,7 +200,10 @@ def test_panosplitter_binary_response(client, monkeypatch):
         assert set(archive.namelist()) == {"slice-01.jpg", "slice-02.jpg", "full-view.jpg", "manifest.json"}
 
 
-def test_cobalt_endpoint_requires_configuration(client):
+def test_cobalt_endpoint_requires_configuration(client, monkeypatch):
+    monkeypatch.setattr(settings, "COBALT_API_BASE_URL", "")
+    monkeypatch.setattr(settings, "COBALT_API_BASE_URL_FALLBACK", False)
+
     response = client.post("/js-tools/cobalt", json={"url": "https://example.com/video"})
     assert response.status_code == 503
 
@@ -280,3 +283,77 @@ def test_cobalt_endpoint_binary_response(client, monkeypatch):
     }
     assert response.content == b"binary-data"
     assert dummy_service.download_called_with["filename_override"] == "custom.mp4"
+
+
+def test_cobalt_shortcut_json_response(client, monkeypatch):
+    monkeypatch.setattr(settings, "COBALT_API_BASE_URL", "https://cobalt.example")
+
+    captured: Dict[str, Any] = {}
+
+    class DummyService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+            captured["payload"] = payload
+            return {"status": "redirect", "url": "https://download/audio.mp3", "filename": "audio.mp3"}
+
+        async def download_binary(self, *_args, **_kwargs):  # pragma: no cover - should not be used here
+            raise AssertionError("download_binary should not be invoked when requesting JSON output")
+
+    monkeypatch.setattr(js_tools_router, "CobaltService", DummyService)
+
+    response = client.post(
+        "/js-tools/cobalt/shortcuts/YOUTUBE-AUDIO",
+        json={"url": "https://example.com/watch", "response_format": "json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["shortcut"] == "youtube-audio"
+    assert payload["download_url"] == "https://download/audio.mp3"
+    assert captured["payload"]["audioFormat"] == "mp3"
+    assert captured["payload"]["downloadMode"] == "audio"
+    assert captured["payload"]["url"] == "https://example.com/watch"
+
+
+def test_cobalt_shortcut_binary_response(client, monkeypatch):
+    monkeypatch.setattr(settings, "COBALT_API_BASE_URL", "https://cobalt.example")
+
+    class DummyService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+            assert payload["service"] == "instagram"
+            assert payload["alwaysProxy"] is True
+            return {"status": "tunnel", "url": "https://download/video.mp4", "filename": "video.mp4"}
+
+        async def download_binary(self, result: Dict[str, Any], *, filename_override=None):
+            assert result["status"] == "tunnel"
+            assert filename_override == "shortcut.mp4"
+            metadata = dict(result)
+            encoded = base64.b64encode(json.dumps(metadata).encode("utf-8")).decode("utf-8")
+            return CobaltBinaryResult(
+                content=b"shortcut-media",
+                filename=filename_override or "video.mp4",
+                content_type="video/mp4",
+                metadata=metadata,
+                encoded_metadata=encoded,
+            )
+
+    monkeypatch.setattr(js_tools_router, "CobaltService", DummyService)
+
+    response = client.post(
+        "/js-tools/cobalt/shortcuts/instagram-story",
+        json={
+            "url": "https://instagram.com/reel/abc",
+            "download_filename": "shortcut.mp4",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "video/mp4"
+    assert response.headers["Content-Disposition"].endswith("shortcut.mp4")
+    assert response.headers["X-Cobalt-Metadata"]
+    assert response.content == b"shortcut-media"

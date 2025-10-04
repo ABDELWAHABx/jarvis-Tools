@@ -8,6 +8,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.services.cobalt_service import CobaltError, CobaltService
+from app.services.cobalt_shortcuts import SHORTCUT_REGISTRY
 from app.services.js_tool_service import JavaScriptToolError, run_panosplitter
 from app.utils.logger import logger
 
@@ -71,6 +72,48 @@ class CobaltRequest(BaseModel):
 def _content_disposition(filename: str) -> str:
     encoded = quote(filename)
     return f"attachment; filename*=UTF-8''{encoded}"
+
+
+def _cobalt_not_configured_message() -> str:
+    return (
+        "Cobalt integration is disabled. Provide COBALT_API_BASE_URL or remove the "
+        "environment variable to use the built-in fallback."
+    )
+
+
+def _get_cobalt_service() -> CobaltService:
+    if not settings.COBALT_API_BASE_URL:
+        raise HTTPException(status_code=503, detail=_cobalt_not_configured_message())
+
+    return CobaltService(
+        base_url=settings.COBALT_API_BASE_URL,
+        auth_scheme=settings.COBALT_API_AUTH_SCHEME,
+        auth_token=settings.COBALT_API_AUTH_TOKEN,
+        timeout=settings.COBALT_API_TIMEOUT,
+    )
+
+
+class CobaltShortcutRequest(BaseModel):
+    url: AnyHttpUrl
+    response_format: Literal["json", "binary"] | None = Field(
+        default=None,
+        description="Override the shortcut response format ('json' or 'binary').",
+    )
+    download_filename: str | None = Field(
+        default=None,
+        description="Optional filename override when requesting binary output.",
+    )
+    options: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional Cobalt payload fields to merge with the shortcut preset.",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+    def to_payload(self, preset: Dict[str, Any]) -> Dict[str, Any]:
+        payload = {**preset, **self.options}
+        payload["url"] = str(self.url)
+        return payload
 
 
 @router.post("/panosplitter", response_model=PanosplitterResponse)
@@ -146,15 +189,7 @@ async def panosplitter_endpoint(
 async def cobalt_endpoint(request: CobaltRequest):
     """Proxy media download requests to a configured Cobalt instance."""
 
-    if not settings.COBALT_API_BASE_URL:
-        raise HTTPException(status_code=503, detail="Cobalt integration is not configured")
-
-    service = CobaltService(
-        base_url=settings.COBALT_API_BASE_URL,
-        auth_scheme=settings.COBALT_API_AUTH_SCHEME,
-        auth_token=settings.COBALT_API_AUTH_TOKEN,
-        timeout=settings.COBALT_API_TIMEOUT,
-    )
+    service = _get_cobalt_service()
 
     try:
         cobalt_result = await service.process(request.to_payload())
@@ -169,4 +204,55 @@ async def cobalt_endpoint(request: CobaltRequest):
         return cobalt_result
     except CobaltError as exc:
         logger.error("Cobalt integration failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post(
+    "/cobalt/shortcuts/{shortcut}",
+    response_model=Dict[str, Any],
+    responses={
+        200: {
+            "content": {
+                "application/zip": {"schema": {"type": "string", "format": "binary"}},
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+            }
+        }
+    },
+)
+async def cobalt_shortcut(shortcut: str, request: CobaltShortcutRequest):
+    """Execute a preconfigured Cobalt request with minimal input."""
+
+    shortcut_key = shortcut.lower()
+    shortcut_config = SHORTCUT_REGISTRY.get(shortcut_key)
+    if not shortcut_config:
+        raise HTTPException(status_code=404, detail=f"Unknown Cobalt shortcut: {shortcut}")
+
+    service = _get_cobalt_service()
+
+    try:
+        payload = request.to_payload(shortcut_config.payload)
+        cobalt_result = await service.process(payload)
+
+        response_format = request.response_format or shortcut_config.response_format
+        if response_format == "binary":
+            binary = await service.download_binary(cobalt_result, filename_override=request.download_filename)
+            headers = {
+                "Content-Disposition": _content_disposition(binary.filename),
+                "X-Cobalt-Metadata": binary.encoded_metadata,
+            }
+            return Response(content=binary.content, media_type=binary.content_type, headers=headers)
+
+        body: Dict[str, Any] = {
+            "shortcut": shortcut_config.slug,
+            "status": cobalt_result.get("status"),
+            "download_url": cobalt_result.get("url"),
+            "filename": cobalt_result.get("filename"),
+            "metadata": cobalt_result,
+        }
+        if request.download_filename:
+            body["download_filename"] = request.download_filename
+
+        return body
+    except CobaltError as exc:
+        logger.error("Cobalt shortcut '%s' failed: %s", shortcut_key, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc

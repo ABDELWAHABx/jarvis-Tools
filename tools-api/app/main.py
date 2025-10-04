@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from fastapi import FastAPI, Request, status
+from urllib.parse import urlparse
+
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -10,6 +12,7 @@ from app.routers import docx, gdocs_parser, image_tools, js_tools, media, parser
 from app.extensions import local_queue_extension
 from app.utils.logger import logger
 from app.config import settings
+from app.services.cobalt_shortcuts import list_shortcuts
 import time
 
 
@@ -161,6 +164,24 @@ async def studio(request: Request):
         """
         return HTMLResponse(content=body, status_code=200)
 
+    cobalt_base = settings.COBALT_API_BASE_URL
+    cobalt_display = cobalt_base
+    if cobalt_base:
+        parsed = urlparse(cobalt_base)
+        host = parsed.netloc or cobalt_base
+        path = parsed.path if parsed.path not in ("", "/") else ""
+        cobalt_display = f"{host}{path}" if path else host
+
+    cobalt_shortcuts = [
+        {
+            "slug": shortcut.slug,
+            "label": shortcut.label,
+            "description": shortcut.description,
+            "response_format": shortcut.response_format,
+        }
+        for shortcut in list_shortcuts()
+    ]
+
     return templates.TemplateResponse(
         "studio.html",
         {
@@ -168,6 +189,13 @@ async def studio(request: Request):
             "docs_url": app.docs_url or "/docs",
             "openapi_url": app.openapi_url or "/openapi.json",
             "version": app.version or "",
+            "cobalt_status": {
+                "configured": bool(cobalt_base),
+                "using_fallback": getattr(settings, "COBALT_API_BASE_URL_FALLBACK", False),
+                "base_url": cobalt_base,
+                "display_name": cobalt_display,
+            },
+            "cobalt_shortcuts": cobalt_shortcuts,
         },
     )
 

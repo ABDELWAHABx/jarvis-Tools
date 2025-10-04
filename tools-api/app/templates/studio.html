@@ -231,6 +231,28 @@
                                 <h3>Cobalt Downloader</h3>
                                 <p class="muted">Proxy downloads through your configured Cobalt instance without leaving the browser.</p>
                             </div>
+                            <div id="cobalt-status-banner" class="status-banner" hidden>
+                                <span class="status-banner__label">Cobalt</span>
+                                <span class="status-banner__message"></span>
+                            </div>
+                            {% if cobalt_shortcuts %}
+                            <div id="cobalt-quick-actions" class="quick-actions">
+                                <p class="helper-text">Need a fast hand-off? Pick a shortcut and paste a link above.</p>
+                                <div class="quick-actions__list">
+                                    {% for shortcut in cobalt_shortcuts %}
+                                    <button
+                                        type="button"
+                                        class="quick-action-btn"
+                                        data-shortcut="{{ shortcut.slug }}"
+                                        data-response-format="{{ shortcut.response_format }}"
+                                    >
+                                        <span class="quick-action-btn__label">{{ shortcut.label }}</span>
+                                        <span class="quick-action-btn__description">{{ shortcut.description }}</span>
+                                    </button>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
                             <label for="cobalt-url">URL</label>
                             <input id="cobalt-url" type="url" required placeholder="https://www.youtube.com/watch?v=..." />
                             <div class="form-row">
@@ -550,7 +572,9 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script>
         window.__STUDIO_CONFIG__ = {
-            openapiUrl: "{{ openapi_url }}"
+            openapiUrl: "{{ openapi_url }}",
+            cobalt: {{ cobalt_status | tojson }},
+            cobaltShortcuts: {{ cobalt_shortcuts | tojson }}
         };
     </script>
     <script src="/static/js/studio.js" type="module"></script>

@@ -40,7 +40,7 @@ class CobaltService:
         if not base_url:
             raise CobaltError("Cobalt API base URL is not configured")
 
-        self.endpoint = base_url.rstrip("/") + "/"
+        self.endpoint = base_url.strip()
         self.auth_scheme = auth_scheme or ""
         self.auth_token = auth_token or ""
         self.timeout = timeout

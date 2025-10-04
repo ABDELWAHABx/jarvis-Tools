@@ -406,6 +406,9 @@ function setupPanosplitterForm() {
 }
 
 function setupCobaltControls() {
+    updateCobaltStatusBanner();
+    setupCobaltShortcuts();
+
     const presetSelect = document.getElementById('cobalt-preset');
     if (presetSelect) {
         presetSelect.addEventListener('change', () => {
@@ -443,6 +446,145 @@ function setupCobaltControls() {
     if (addOptionButton) {
         addOptionButton.addEventListener('click', () => addCobaltOptionRow());
     }
+}
+
+function updateCobaltStatusBanner() {
+    const banner = document.getElementById('cobalt-status-banner');
+    if (!banner) {
+        return;
+    }
+
+    const cobaltConfig = config.cobalt || {};
+    const messageNode = banner.querySelector('.status-banner__message');
+    const quickActions = document.getElementById('cobalt-quick-actions');
+
+    banner.classList.remove(
+        'status-banner--success',
+        'status-banner--info',
+        'status-banner--warning',
+        'status-banner--danger'
+    );
+
+    if (!cobaltConfig.configured) {
+        if (messageNode) {
+            messageNode.textContent =
+                'Cobalt is disabled. Set COBALT_API_BASE_URL or remove it to enable the built-in fallback instance.';
+        }
+        banner.classList.add('status-banner--danger');
+        banner.hidden = false;
+        disableCobaltFormInputs();
+        if (quickActions) {
+            quickActions.classList.add('quick-actions--disabled');
+            quickActions.querySelectorAll('button').forEach((button) => {
+                button.disabled = true;
+            });
+        }
+        return;
+    }
+
+    const label = cobaltConfig.display_name || cobaltConfig.base_url;
+    if (messageNode) {
+        messageNode.textContent = cobaltConfig.usingFallback
+            ? `Using public fallback (${label}). Configure COBALT_API_BASE_URL for a private instance.`
+            : `Connected to ${label}.`;
+    }
+
+    banner.classList.add(cobaltConfig.usingFallback ? 'status-banner--info' : 'status-banner--success');
+    banner.hidden = false;
+
+    if (quickActions) {
+        quickActions.classList.remove('quick-actions--disabled');
+        quickActions.querySelectorAll('button').forEach((button) => {
+            button.disabled = false;
+        });
+    }
+}
+
+function disableCobaltFormInputs() {
+    const form = document.getElementById('cobalt-form');
+    if (!form) {
+        return;
+    }
+
+    form.classList.add('is-disabled');
+    form.querySelectorAll('input, select, textarea, button').forEach((element) => {
+        element.disabled = true;
+    });
+}
+
+function setupCobaltShortcuts() {
+    const container = document.getElementById('cobalt-quick-actions');
+    if (!container) {
+        return;
+    }
+
+    const cobaltConfig = config.cobalt || {};
+    const urlField = document.getElementById('cobalt-url');
+    const buttons = container.querySelectorAll('[data-shortcut]');
+
+    if (!cobaltConfig.configured) {
+        buttons.forEach((button) => {
+            button.disabled = true;
+        });
+        return;
+    }
+
+    buttons.forEach((button) => {
+        button.addEventListener('click', async () => {
+            if (!(urlField instanceof HTMLInputElement)) {
+                return;
+            }
+
+            const shortcut = button.dataset.shortcut;
+            if (!shortcut) {
+                return;
+            }
+
+            const url = urlField.value.trim();
+            if (!url) {
+                showToast('Paste a URL before choosing a shortcut.', 'warning');
+                urlField.focus();
+                return;
+            }
+
+            const labelNode = button.querySelector('.quick-action-btn__label');
+            const label = labelNode ? labelNode.textContent.trim() : shortcut;
+            const responseFormat = button.dataset.responseFormat || 'json';
+
+            try {
+                await withButtonLoading(button, async () => {
+                    const payload = { url };
+                    if (responseFormat) {
+                        payload.response_format = responseFormat;
+                    }
+
+                    const response = await fetch(`/js-tools/cobalt/shortcuts/${shortcut}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (responseFormat === 'binary') {
+                        await renderCobaltBinaryResponse(response, {
+                            fallbackFilename: `${shortcut}.bin`,
+                            successMessage: `${label} ready.`,
+                        });
+                        return;
+                    }
+
+                    await renderCobaltJsonResponse(response, {
+                        title: `${label} (Shortcut)`,
+                        successMessage: `${label} response ready.`,
+                    });
+                });
+            } catch (error) {
+                console.error(error);
+                showToast(error.message || 'Cobalt shortcut failed.', 'error');
+            }
+        });
+    });
 }
 
 function applyCobaltPreset(select) {
@@ -693,7 +835,61 @@ function transformCobaltCustomOptionValue(type, rawValue) {
     return rawValue;
 }
 
+async function renderCobaltBinaryResponse(response, options = {}) {
+    const blob = await parseBinaryResponse(response);
+    const disposition = response.headers.get('Content-Disposition');
+    const metadataHeader = response.headers.get('X-Cobalt-Metadata');
+
+    const metadata = metadataHeader ? safeJsonDecode(atob(metadataHeader)) : null;
+    const filename =
+        options.downloadFilename ||
+        parseFilename(disposition) ||
+        options.fallbackFilename ||
+        'cobalt-download.bin';
+
+    const groups = [
+        createResultGroup(options.title || 'Cobalt Download', [
+            createDownloadLinkFromBlob(blob, filename, options.linkLabel || 'Download Media')
+        ])
+    ];
+
+    if (metadata) {
+        groups.push(createResultGroup('Cobalt Metadata', [createPre(metadata)]));
+        groups.push(...buildSubtitleGroups(metadata));
+    }
+
+    setResult(options.containerId || 'js-results', groups);
+    showToast(options.successMessage || 'Cobalt download ready.');
+
+    return { blob, metadata, filename };
+}
+
+async function renderCobaltJsonResponse(response, options = {}) {
+    const payload = await parseResponse(response);
+    const containerId = options.containerId || 'js-results';
+    const title = options.title || 'Cobalt Response';
+    const groups = [createResultGroup(title, [createPre(payload)])];
+
+    const shouldIncludeSubtitles = options.includeSubtitles !== false;
+    if (shouldIncludeSubtitles && payload && typeof payload === 'object') {
+        const subtitleSource = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : payload;
+        const subtitleGroups = buildSubtitleGroups(subtitleSource);
+        if (subtitleGroups.length) {
+            groups.push(...subtitleGroups);
+        }
+    }
+
+    setResult(containerId, groups);
+    showToast(options.successMessage || 'Cobalt response received.');
+
+    return payload;
+}
+
 function setupCobaltForm() {
+    if (config.cobalt && config.cobalt.configured === false) {
+        return;
+    }
+
     attachSubmit('cobalt-form', async () => {
         const urlField = document.getElementById('cobalt-url');
         const binaryToggle = document.getElementById('cobalt-binary');
@@ -775,35 +971,11 @@ function setupCobaltForm() {
         });
 
         if (binaryToggle.checked) {
-            const blob = await parseBinaryResponse(response);
-            const filename =
-                filenameOverride ||
-                parseFilename(response.headers.get('Content-Disposition')) ||
-                'cobalt-download.bin';
-            const metadataHeader = response.headers.get('X-Cobalt-Metadata');
-            const metadata = metadataHeader ? safeJsonDecode(atob(metadataHeader)) : null;
-
-            const groups = [
-                createResultGroup('Cobalt Download', [
-                    createDownloadLinkFromBlob(blob, filename, 'Download Media')
-                ])
-            ];
-            if (metadata) {
-                groups.push(createResultGroup('Cobalt Metadata', [createPre(metadata)]));
-                groups.push(...buildSubtitleGroups(metadata));
-            }
-
-            setResult('js-results', groups);
-            showToast('Cobalt download ready.');
+            await renderCobaltBinaryResponse(response, {
+                downloadFilename: filenameOverride,
+            });
         } else {
-            const result = await parseResponse(response);
-            const groups = [createResultGroup('Cobalt Response', [createPre(result)])];
-            const subtitleGroups = buildSubtitleGroups((result && result.metadata) || result);
-            if (subtitleGroups.length) {
-                groups.push(...subtitleGroups);
-            }
-            setResult('js-results', groups);
-            showToast('Cobalt response received.');
+            await renderCobaltJsonResponse(response);
         }
     });
 }
@@ -1666,6 +1838,22 @@ async function withLoading(form, callback) {
             submit.disabled = false;
             submit.textContent = submit.dataset.originalText || originalText || 'Submit';
         }
+    }
+}
+
+async function withButtonLoading(button, callback) {
+    if (!(button instanceof HTMLButtonElement)) {
+        return callback();
+    }
+
+    button.disabled = true;
+    button.dataset.loading = 'true';
+
+    try {
+        return await callback();
+    } finally {
+        delete button.dataset.loading;
+        button.disabled = false;
     }
 }
 
