@@ -4,10 +4,12 @@ from typing import Any, Dict, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Query, Response
+from fastapi.responses import JSONResponse
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from app.config import settings
-from app.services.cobalt_service import CobaltError, CobaltService
+from app.services.cobalt_gateway import CobaltGateway, create_gateway
+from app.services.cobalt_service import CobaltError
 from app.services.cobalt_shortcuts import SHORTCUT_REGISTRY
 from app.services.js_tool_service import JavaScriptToolError, run_panosplitter
 from app.utils.logger import logger
@@ -74,23 +76,23 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename*=UTF-8''{encoded}"
 
 
-def _cobalt_not_configured_message() -> str:
-    return (
-        "Cobalt integration is disabled. Provide COBALT_API_BASE_URL or remove the "
-        "environment variable to use the built-in fallback."
-    )
+_cobalt_gateway: CobaltGateway | None = None
 
 
-def _get_cobalt_service() -> CobaltService:
-    if not settings.COBALT_API_BASE_URL:
-        raise HTTPException(status_code=503, detail=_cobalt_not_configured_message())
+def _get_cobalt_service() -> CobaltGateway:
+    global _cobalt_gateway
+    if _cobalt_gateway is None:
+        try:
+            _cobalt_gateway = create_gateway(
+                remote_base_url=settings.COBALT_API_BASE_URL,
+                auth_scheme=settings.COBALT_API_AUTH_SCHEME,
+                auth_token=settings.COBALT_API_AUTH_TOKEN,
+                timeout=settings.COBALT_API_TIMEOUT,
+            )
+        except CobaltError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return CobaltService(
-        base_url=settings.COBALT_API_BASE_URL,
-        auth_scheme=settings.COBALT_API_AUTH_SCHEME,
-        auth_token=settings.COBALT_API_AUTH_TOKEN,
-        timeout=settings.COBALT_API_TIMEOUT,
-    )
+    return _cobalt_gateway
 
 
 class CobaltShortcutRequest(BaseModel):
@@ -189,19 +191,32 @@ async def panosplitter_endpoint(
 async def cobalt_endpoint(request: CobaltRequest):
     """Proxy media download requests to a configured Cobalt instance."""
 
-    service = _get_cobalt_service()
-
     try:
-        cobalt_result = await service.process(request.to_payload())
+        result = await _get_cobalt_service().process(
+            request.to_payload(),
+            expect_binary=request.response_format == "binary",
+            filename_override=request.download_filename,
+        )
+        backend = "local" if result.used_local_fallback else "remote"
+        headers = {
+            "X-Cobalt-Backend": backend,
+            "X-Cobalt-Source": result.source_label,
+        }
+
         if request.response_format == "binary":
-            binary = await service.download_binary(cobalt_result, filename_override=request.download_filename)
-            headers = {
-                "Content-Disposition": _content_disposition(binary.filename),
-                "X-Cobalt-Metadata": binary.encoded_metadata,
-            }
+            if result.binary is None:
+                raise CobaltError("Cobalt backend did not return a binary payload")
+
+            binary = result.binary
+            headers.update(
+                {
+                    "Content-Disposition": _content_disposition(binary.filename),
+                    "X-Cobalt-Metadata": binary.encoded_metadata,
+                }
+            )
             return Response(content=binary.content, media_type=binary.content_type, headers=headers)
 
-        return cobalt_result
+        return JSONResponse(content=result.payload, headers=headers)
     except CobaltError as exc:
         logger.error("Cobalt integration failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -227,32 +242,44 @@ async def cobalt_shortcut(shortcut: str, request: CobaltShortcutRequest):
     if not shortcut_config:
         raise HTTPException(status_code=404, detail=f"Unknown Cobalt shortcut: {shortcut}")
 
-    service = _get_cobalt_service()
-
     try:
         payload = request.to_payload(shortcut_config.payload)
-        cobalt_result = await service.process(payload)
-
         response_format = request.response_format or shortcut_config.response_format
+        result = await _get_cobalt_service().process(
+            payload,
+            expect_binary=response_format == "binary",
+            filename_override=request.download_filename,
+        )
+        backend = "local" if result.used_local_fallback else "remote"
+        headers = {
+            "X-Cobalt-Backend": backend,
+            "X-Cobalt-Source": result.source_label,
+        }
+
         if response_format == "binary":
-            binary = await service.download_binary(cobalt_result, filename_override=request.download_filename)
-            headers = {
-                "Content-Disposition": _content_disposition(binary.filename),
-                "X-Cobalt-Metadata": binary.encoded_metadata,
-            }
+            if result.binary is None:
+                raise CobaltError("Cobalt backend did not return a binary payload")
+
+            binary = result.binary
+            headers.update(
+                {
+                    "Content-Disposition": _content_disposition(binary.filename),
+                    "X-Cobalt-Metadata": binary.encoded_metadata,
+                }
+            )
             return Response(content=binary.content, media_type=binary.content_type, headers=headers)
 
         body: Dict[str, Any] = {
             "shortcut": shortcut_config.slug,
-            "status": cobalt_result.get("status"),
-            "download_url": cobalt_result.get("url"),
-            "filename": cobalt_result.get("filename"),
-            "metadata": cobalt_result,
+            "status": result.payload.get("status"),
+            "download_url": result.payload.get("url"),
+            "filename": result.payload.get("filename"),
+            "metadata": result.payload,
         }
         if request.download_filename:
             body["download_filename"] = request.download_filename
 
-        return body
+        return JSONResponse(content=body, headers=headers)
     except CobaltError as exc:
         logger.error("Cobalt shortcut '%s' failed: %s", shortcut_key, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc

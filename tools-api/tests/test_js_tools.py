@@ -11,7 +11,8 @@ import app.routers.js_tools as js_tools_router
 from app.config import settings
 from app.main import app
 from app.services import js_tool_service
-from app.services.cobalt_service import CobaltBinaryResult
+from app.services.cobalt_gateway import CobaltProcessResult
+from app.services.cobalt_service import CobaltBinaryResult, CobaltError
 from app.services.js_tool_service import PanosplitterResult
 
 
@@ -203,6 +204,12 @@ def test_panosplitter_binary_response(client, monkeypatch):
 def test_cobalt_endpoint_requires_configuration(client, monkeypatch):
     monkeypatch.setattr(settings, "COBALT_API_BASE_URL", "")
     monkeypatch.setattr(settings, "COBALT_API_BASE_URL_FALLBACK", False)
+    monkeypatch.setattr(js_tools_router, "_cobalt_gateway", None)
+
+    def raise_gateway(**_kwargs):
+        raise CobaltError("no cobalt backends available")
+
+    monkeypatch.setattr(js_tools_router, "create_gateway", raise_gateway)
 
     response = client.post("/js-tools/cobalt", json={"url": "https://example.com/video"})
     assert response.status_code == 503
@@ -213,18 +220,21 @@ def test_cobalt_endpoint_json_response(client, monkeypatch):
 
     captured: Dict[str, Any] = {}
 
-    class DummyService:
-        def __init__(self, *args, **kwargs):
-            pass
+    class DummyGateway:
+        has_remote = True
+        has_local = False
 
-        async def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        async def process(self, payload: Dict[str, Any], *, expect_binary: bool, filename_override=None):
             captured["payload"] = payload
-            return {"status": "tunnel", "url": "https://download", "filename": "demo.mp4"}
+            captured["expect_binary"] = expect_binary
+            return CobaltProcessResult(
+                payload={"status": "tunnel", "url": "https://download", "filename": "demo.mp4"},
+                binary=None,
+                used_local_fallback=False,
+                source_label="remote.test",
+            )
 
-        async def download_binary(self, *_args, **_kwargs):  # pragma: no cover - not used here
-            raise AssertionError("download_binary should not be called for JSON response")
-
-    monkeypatch.setattr(js_tools_router, "CobaltService", DummyService)
+    monkeypatch.setattr(js_tools_router, "_cobalt_gateway", DummyGateway())
 
     response = client.post(
         "/js-tools/cobalt",
@@ -232,36 +242,41 @@ def test_cobalt_endpoint_json_response(client, monkeypatch):
     )
 
     assert response.status_code == 200
+    assert response.headers["X-Cobalt-Backend"] == "remote"
+    assert response.headers["X-Cobalt-Source"] == "remote.test"
     payload = response.json()
     assert payload["status"] == "tunnel"
     assert captured["payload"]["audioFormat"] == "mp3"
+    assert captured["expect_binary"] is False
 
 
 def test_cobalt_endpoint_binary_response(client, monkeypatch):
     monkeypatch.setattr(settings, "COBALT_API_BASE_URL", "https://cobalt.example")
 
-    class DummyService:
-        def __init__(self, *args, **kwargs):
-            self.download_called_with: Dict[str, Any] | None = None
+    class DummyGateway:
+        has_remote = True
+        has_local = False
 
-        async def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-            return {"status": "tunnel", "url": "https://download", "filename": "remote.mp4"}
-
-        async def download_binary(self, result: Dict[str, Any], *, filename_override=None):
-            self.download_called_with = {
-                "result": result,
-                "filename_override": filename_override,
-            }
-            return CobaltBinaryResult(
+        async def process(self, payload: Dict[str, Any], *, expect_binary: bool, filename_override=None):
+            assert expect_binary is True
+            assert filename_override == "custom.mp4"
+            metadata = {"status": "tunnel", "url": "https://download", "filename": "remote.mp4"}
+            encoded = base64.b64encode(json.dumps(metadata).encode("utf-8")).decode("utf-8")
+            binary = CobaltBinaryResult(
                 content=b"binary-data",
                 filename="cobalt.mp4" if filename_override is None else filename_override,
                 content_type="video/mp4",
-                metadata=result,
-                encoded_metadata=base64.b64encode(json.dumps(result).encode("utf-8")).decode("utf-8"),
+                metadata=metadata,
+                encoded_metadata=encoded,
+            )
+            return CobaltProcessResult(
+                payload=metadata,
+                binary=binary,
+                used_local_fallback=False,
+                source_label="remote.test",
             )
 
-    dummy_service = DummyService()
-    monkeypatch.setattr(js_tools_router, "CobaltService", lambda *args, **kwargs: dummy_service)
+    monkeypatch.setattr(js_tools_router, "_cobalt_gateway", DummyGateway())
 
     response = client.post(
         "/js-tools/cobalt",
@@ -275,6 +290,8 @@ def test_cobalt_endpoint_binary_response(client, monkeypatch):
     assert response.status_code == 200
     assert response.headers["content-type"] == "video/mp4"
     assert response.headers["Content-Disposition"].endswith("custom.mp4")
+    assert response.headers["X-Cobalt-Backend"] == "remote"
+    assert response.headers["X-Cobalt-Source"] == "remote.test"
     metadata_header = response.headers["X-Cobalt-Metadata"]
     assert json.loads(base64.b64decode(metadata_header)) == {
         "status": "tunnel",
@@ -282,7 +299,6 @@ def test_cobalt_endpoint_binary_response(client, monkeypatch):
         "filename": "remote.mp4",
     }
     assert response.content == b"binary-data"
-    assert dummy_service.download_called_with["filename_override"] == "custom.mp4"
 
 
 def test_cobalt_shortcut_json_response(client, monkeypatch):
@@ -290,18 +306,21 @@ def test_cobalt_shortcut_json_response(client, monkeypatch):
 
     captured: Dict[str, Any] = {}
 
-    class DummyService:
-        def __init__(self, *args, **kwargs):
-            pass
+    class DummyGateway:
+        has_remote = True
+        has_local = False
 
-        async def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        async def process(self, payload: Dict[str, Any], *, expect_binary: bool, filename_override=None):
             captured["payload"] = payload
-            return {"status": "redirect", "url": "https://download/audio.mp3", "filename": "audio.mp3"}
+            captured["expect_binary"] = expect_binary
+            return CobaltProcessResult(
+                payload={"status": "redirect", "url": "https://download/audio.mp3", "filename": "audio.mp3"},
+                binary=None,
+                used_local_fallback=False,
+                source_label="remote.test",
+            )
 
-        async def download_binary(self, *_args, **_kwargs):  # pragma: no cover - should not be used here
-            raise AssertionError("download_binary should not be invoked when requesting JSON output")
-
-    monkeypatch.setattr(js_tools_router, "CobaltService", DummyService)
+    monkeypatch.setattr(js_tools_router, "_cobalt_gateway", DummyGateway())
 
     response = client.post(
         "/js-tools/cobalt/shortcuts/YOUTUBE-AUDIO",
@@ -309,40 +328,44 @@ def test_cobalt_shortcut_json_response(client, monkeypatch):
     )
 
     assert response.status_code == 200
+    assert response.headers["X-Cobalt-Backend"] == "remote"
     payload = response.json()
     assert payload["shortcut"] == "youtube-audio"
     assert payload["download_url"] == "https://download/audio.mp3"
     assert captured["payload"]["audioFormat"] == "mp3"
     assert captured["payload"]["downloadMode"] == "audio"
     assert captured["payload"]["url"] == "https://example.com/watch"
+    assert captured["expect_binary"] is False
 
 
 def test_cobalt_shortcut_binary_response(client, monkeypatch):
     monkeypatch.setattr(settings, "COBALT_API_BASE_URL", "https://cobalt.example")
 
-    class DummyService:
-        def __init__(self, *args, **kwargs):
-            pass
+    class DummyGateway:
+        has_remote = True
+        has_local = False
 
-        async def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        async def process(self, payload: Dict[str, Any], *, expect_binary: bool, filename_override=None):
+            assert expect_binary is True
             assert payload["service"] == "instagram"
             assert payload["alwaysProxy"] is True
-            return {"status": "tunnel", "url": "https://download/video.mp4", "filename": "video.mp4"}
-
-        async def download_binary(self, result: Dict[str, Any], *, filename_override=None):
-            assert result["status"] == "tunnel"
-            assert filename_override == "shortcut.mp4"
-            metadata = dict(result)
+            metadata = {"status": "tunnel", "url": "https://download/video.mp4", "filename": "video.mp4"}
             encoded = base64.b64encode(json.dumps(metadata).encode("utf-8")).decode("utf-8")
-            return CobaltBinaryResult(
+            binary = CobaltBinaryResult(
                 content=b"shortcut-media",
                 filename=filename_override or "video.mp4",
                 content_type="video/mp4",
                 metadata=metadata,
                 encoded_metadata=encoded,
             )
+            return CobaltProcessResult(
+                payload=metadata,
+                binary=binary,
+                used_local_fallback=False,
+                source_label="remote.test",
+            )
 
-    monkeypatch.setattr(js_tools_router, "CobaltService", DummyService)
+    monkeypatch.setattr(js_tools_router, "_cobalt_gateway", DummyGateway())
 
     response = client.post(
         "/js-tools/cobalt/shortcuts/instagram-story",
@@ -356,4 +379,5 @@ def test_cobalt_shortcut_binary_response(client, monkeypatch):
     assert response.headers["content-type"] == "video/mp4"
     assert response.headers["Content-Disposition"].endswith("shortcut.mp4")
     assert response.headers["X-Cobalt-Metadata"]
+    assert response.headers["X-Cobalt-Backend"] == "remote"
     assert response.content == b"shortcut-media"

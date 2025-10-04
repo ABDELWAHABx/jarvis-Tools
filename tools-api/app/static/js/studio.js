@@ -45,6 +45,12 @@ const COBALT_BOOLEAN_SELECT_FIELDS = {
     convertGif: 'cobalt-convert-gif'
 };
 
+const COBALT_MODE_DESCRIPTIONS = {
+    video: 'Video downloads include audio by default. Switch to audio for podcast-ready files or metadata for quick manifest checks.',
+    audio: 'Audio downloads focus on the richest track available – perfect for podcasts or offline listening.',
+    metadata: 'Skip the download and fetch the manifest only. Great for automations that just need URLs or subtitles.'
+};
+
 const languageDisplayNames =
     typeof Intl !== 'undefined' && typeof Intl.DisplayNames === 'function'
         ? new Intl.DisplayNames(['en'], { type: 'language' })
@@ -425,6 +431,7 @@ function setupPanosplitterForm() {
 function setupCobaltControls() {
     updateCobaltStatusBanner();
     setupCobaltShortcuts();
+    setupCobaltModeControls();
 
     const presetSelect = document.getElementById('cobalt-preset');
     if (presetSelect) {
@@ -465,6 +472,90 @@ function setupCobaltControls() {
     }
 }
 
+function getSelectedCobaltMode() {
+    const checked = document.querySelector('input[name="cobalt-mode"]:checked');
+    return checked instanceof HTMLInputElement ? checked.value : 'video';
+}
+
+function updateCobaltModeUI(mode = getSelectedCobaltMode()) {
+    const description = document.getElementById('cobalt-mode-description');
+    if (description) {
+        description.textContent = COBALT_MODE_DESCRIPTIONS[mode] || COBALT_MODE_DESCRIPTIONS.video;
+    }
+
+    const binaryToggle = document.getElementById('cobalt-binary');
+    if (binaryToggle instanceof HTMLInputElement) {
+        if (mode === 'metadata') {
+            binaryToggle.checked = false;
+            binaryToggle.disabled = true;
+        } else {
+            const shouldAutoCheck = binaryToggle.dataset.userToggled !== 'true';
+            binaryToggle.disabled = false;
+            if (shouldAutoCheck) {
+                binaryToggle.checked = true;
+            }
+        }
+    }
+
+    const downloadModeSelect = document.getElementById('cobalt-download-mode');
+    if (downloadModeSelect instanceof HTMLSelectElement) {
+        if (downloadModeSelect.dataset.userToggled !== 'true') {
+            if (mode === 'audio') {
+                downloadModeSelect.value = 'audio';
+            } else if (mode === 'video') {
+                downloadModeSelect.value = '';
+            }
+        }
+    }
+}
+
+function setCobaltMode(mode) {
+    const target = document.querySelector(`input[name="cobalt-mode"][value="${mode}"]`);
+    if (!(target instanceof HTMLInputElement)) {
+        return;
+    }
+    target.checked = true;
+
+    const binaryToggle = document.getElementById('cobalt-binary');
+    if (binaryToggle instanceof HTMLInputElement) {
+        delete binaryToggle.dataset.userToggled;
+    }
+
+    const downloadModeSelect = document.getElementById('cobalt-download-mode');
+    if (downloadModeSelect instanceof HTMLSelectElement) {
+        delete downloadModeSelect.dataset.userToggled;
+    }
+
+    updateCobaltModeUI(mode);
+}
+
+function setupCobaltModeControls() {
+    const modeRadios = document.querySelectorAll('input[name="cobalt-mode"]');
+    if (!modeRadios.length) {
+        return;
+    }
+
+    const binaryToggle = document.getElementById('cobalt-binary');
+    if (binaryToggle instanceof HTMLInputElement) {
+        binaryToggle.addEventListener('change', () => {
+            binaryToggle.dataset.userToggled = 'true';
+        });
+    }
+
+    const downloadModeSelect = document.getElementById('cobalt-download-mode');
+    if (downloadModeSelect instanceof HTMLSelectElement) {
+        downloadModeSelect.addEventListener('change', () => {
+            downloadModeSelect.dataset.userToggled = 'true';
+        });
+    }
+
+    modeRadios.forEach((radio) => {
+        radio.addEventListener('change', () => updateCobaltModeUI(radio.value));
+    });
+
+    updateCobaltModeUI();
+}
+
 function updateCobaltStatusBanner() {
     const banner = document.getElementById('cobalt-status-banner');
     if (!banner) {
@@ -485,7 +576,7 @@ function updateCobaltStatusBanner() {
     if (!cobaltConfig.configured) {
         if (messageNode) {
             messageNode.textContent =
-                'Cobalt is disabled. Set COBALT_API_BASE_URL or remove it to enable the built-in fallback instance.';
+                'Cobalt is disabled. Install yt-dlp via run_all.py or configure COBALT_API_BASE_URL to enable downloads.';
         }
         banner.classList.add('status-banner--danger');
         banner.hidden = false;
@@ -500,13 +591,28 @@ function updateCobaltStatusBanner() {
     }
 
     const label = cobaltConfig.display_name || cobaltConfig.base_url;
+    const hasRemote = Boolean(cobaltConfig.remote_available);
+    const hasLocal = Boolean(cobaltConfig.local_available);
+
     if (messageNode) {
-        messageNode.textContent = cobaltConfig.usingFallback
-            ? `Using public fallback (${label}). Configure COBALT_API_BASE_URL for a private instance.`
-            : `Connected to ${label}.`;
+        if (hasRemote && hasLocal) {
+            messageNode.textContent =
+                label
+                    ? `Remote Cobalt (${label}) ready. Local yt-dlp fallback enabled automatically.`
+                    : 'Remote Cobalt ready. Local yt-dlp fallback enabled automatically.';
+        } else if (hasRemote) {
+            messageNode.textContent = label ? `Connected to ${label}.` : 'Remote Cobalt instance connected.';
+        } else if (hasLocal) {
+            messageNode.textContent =
+                'No remote Cobalt configured — using the built-in yt-dlp fallback for downloads.';
+        }
     }
 
-    banner.classList.add(cobaltConfig.usingFallback ? 'status-banner--info' : 'status-banner--success');
+    if (hasRemote) {
+        banner.classList.add('status-banner--success');
+    } else {
+        banner.classList.add('status-banner--info');
+    }
     banner.hidden = false;
 
     if (quickActions) {
@@ -643,6 +749,10 @@ function applyCobaltPreset(select) {
             return;
         }
 
+        if (key === 'downloadMode') {
+            setCobaltMode(String(value));
+        }
+
         if (Object.prototype.hasOwnProperty.call(COBALT_FIELD_IDS, key)) {
             const fieldId = COBALT_FIELD_IDS[key];
             const field = document.getElementById(fieldId);
@@ -702,12 +812,22 @@ function resetCobaltPresetFields() {
     const binaryToggle = document.getElementById('cobalt-binary');
     if (binaryToggle instanceof HTMLInputElement) {
         binaryToggle.checked = false;
+        binaryToggle.disabled = false;
+        delete binaryToggle.dataset.userToggled;
     }
 
     const filenameField = document.getElementById('cobalt-filename');
     if (filenameField instanceof HTMLInputElement) {
         filenameField.value = '';
     }
+
+    const downloadModeSelect = document.getElementById('cobalt-download-mode');
+    if (downloadModeSelect instanceof HTMLSelectElement) {
+        downloadModeSelect.value = '';
+        delete downloadModeSelect.dataset.userToggled;
+    }
+
+    setCobaltMode('video');
 }
 
 function updateCobaltPresetDescription(select) {
@@ -970,6 +1090,29 @@ function setupCobaltForm() {
                 }
             }
         });
+
+        const selectedMode = getSelectedCobaltMode();
+        if (
+            selectedMode === 'audio' &&
+            !Object.prototype.hasOwnProperty.call(payload, 'downloadMode') &&
+            !Object.prototype.hasOwnProperty.call(customOptions, 'downloadMode') &&
+            !Object.prototype.hasOwnProperty.call(extraPayload, 'downloadMode')
+        ) {
+            payload.downloadMode = 'audio';
+        }
+
+        if (
+            selectedMode === 'metadata' &&
+            !Object.prototype.hasOwnProperty.call(payload, 'downloadMode') &&
+            !Object.prototype.hasOwnProperty.call(customOptions, 'downloadMode') &&
+            !Object.prototype.hasOwnProperty.call(extraPayload, 'downloadMode')
+        ) {
+            payload.downloadMode = 'metadata';
+        }
+
+        if (selectedMode === 'metadata') {
+            payload.response_format = 'json';
+        }
 
         if (customOptions && Object.keys(customOptions).length) {
             Object.assign(payload, customOptions);
