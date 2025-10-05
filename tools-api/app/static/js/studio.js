@@ -7,10 +7,13 @@ const ytDlpState = {
     rawResponse: null,
     formatsById: new Map(),
     dom: {},
-    lastTemplate: 'best',
     modalKeyListener: null,
     selectedFormatId: null,
-    subtitleLanguageFilter: 'en',
+    subtitleLanguageFilter: 'all',
+    selectedSubtitleSource: 'original',
+    selectedSubtitleLanguages: [],
+    availableSubtitles: { original: [], auto: [] },
+    mode: 'video',
     downloadNodes: null,
     downloadProgress: null,
     downloadProgressTimer: null,
@@ -55,12 +58,6 @@ const languageDisplayNames =
     typeof Intl !== 'undefined' && typeof Intl.DisplayNames === 'function'
         ? new Intl.DisplayNames(['en'], { type: 'language' })
         : null;
-
-const YT_DLP_SHORTCUT_LABELS = {
-    best: 'Best available',
-    fhd: '1080p video',
-    audio: 'Audio only'
-};
 
 function init() {
     setupNavigation();
@@ -1155,8 +1152,9 @@ function setupYtDlpForm() {
     const writeSubtitlesToggle = document.getElementById('yt-dlp-write-subtitles');
     const writeAutoSubToggle = document.getElementById('yt-dlp-write-auto-sub');
     const subtitleLangsField = document.getElementById('yt-dlp-subtitle-langs');
-    const templateSelect = document.getElementById('yt-dlp-template');
-    const templateHint = document.getElementById('yt-dlp-template-hint');
+    const modeToggle = document.getElementById('yt-dlp-mode-toggle');
+    const subtitleControls = document.getElementById('yt-dlp-subtitle-controls');
+    const subtitleLanguageList = document.getElementById('yt-dlp-subtitle-language-list');
     const openModalButton = document.getElementById('yt-dlp-open-modal');
     const modal = document.getElementById('yt-dlp-modal');
     const modalSubtitle = document.getElementById('yt-dlp-modal-subtitle');
@@ -1179,8 +1177,9 @@ function setupYtDlpForm() {
         writeSubtitlesToggle,
         writeAutoSubToggle,
         subtitleLangsField,
-        templateSelect,
-        templateHint,
+        modeToggle,
+        subtitleControls,
+        subtitleLanguageList,
         openModalButton,
         modal,
         modalSubtitle,
@@ -1189,80 +1188,40 @@ function setupYtDlpForm() {
         progressContainer,
         progressLabel,
         progressPercent,
-        progressIndicator
+        progressIndicator,
+        downloadActionButton: null
     };
 
-    const templatePresets = {
-        best: {
-            description: 'Ideal when you want the highest quality video with audio.',
-            values: {
-                format: 'bestvideo*+bestaudio/best',
-                writeSubtitles: false,
-                writeAutoSub: false,
-                subtitleLangs: ''
-            }
-        },
-        hd1080: {
-            description: 'Prefer 1080p (or the best available below it) with merged audio.',
-            values: {
-                format: 'bv*[height<=1080]+ba/b[height<=1080]',
-                writeSubtitles: false,
-                writeAutoSub: false
-            }
-        },
-        audio: {
-            description: 'Grab the best available audio track without video.',
-            values: {
-                format: 'bestaudio/best',
-                writeSubtitles: false,
-                writeAutoSub: false
-            }
-        },
-        subtitles: {
-            description: 'Download metadata while preparing subtitle files for offline viewing.',
-            values: {
-                format: 'best',
-                writeSubtitles: true,
-                writeAutoSub: true
-            }
-        },
-        custom: {
-            description: 'Keep full control of every yt-dlp option yourself.'
-        }
-    };
-
-    function applyTemplateChoice(id, applyValues = true) {
-        const preset = templatePresets[id] || templatePresets.best;
-        ytDlpState.lastTemplate = id;
-        if (templateHint) {
-            templateHint.textContent = preset.description;
-        }
-        if (!applyValues || !preset.values) {
-            return;
-        }
-        const values = preset.values;
-        if (formatField && Object.prototype.hasOwnProperty.call(values, 'format')) {
-            formatField.value = values.format || '';
-        }
-        if (writeSubtitlesToggle && Object.prototype.hasOwnProperty.call(values, 'writeSubtitles')) {
-            writeSubtitlesToggle.checked = Boolean(values.writeSubtitles);
-        }
-        if (writeAutoSubToggle && Object.prototype.hasOwnProperty.call(values, 'writeAutoSub')) {
-            writeAutoSubToggle.checked = Boolean(values.writeAutoSub);
-        }
-        if (subtitleLangsField && Object.prototype.hasOwnProperty.call(values, 'subtitleLangs')) {
-            subtitleLangsField.value = values.subtitleLangs || '';
-        }
+    if (modeToggle) {
+        const modeRadios = modeToggle.querySelectorAll('input[name="yt-dlp-mode"]');
+        modeRadios.forEach((radio) => {
+            radio.addEventListener('change', () => {
+                if (!radio.checked) {
+                    return;
+                }
+                ytDlpState.mode = radio.value;
+                refreshYtDlpMode();
+            });
+        });
     }
 
-    if (templateSelect) {
-        templateSelect.addEventListener('change', () => {
-            applyTemplateChoice(templateSelect.value);
+    if (subtitleControls) {
+        subtitleControls.querySelectorAll('input[name="yt-dlp-subtitle-source"]').forEach((radio) => {
+            radio.addEventListener('change', () => {
+                if (!radio.checked) {
+                    return;
+                }
+                ytDlpState.selectedSubtitleSource = radio.value;
+                syncSubtitleLanguageSelection();
+            });
         });
-        if (!templateSelect.value) {
-            templateSelect.value = 'best';
-        }
-        applyTemplateChoice(templateSelect.value, true);
+    }
+
+    if (subtitleLanguageList) {
+        subtitleLanguageList.addEventListener('change', () => {
+            const selections = Array.from(subtitleLanguageList.selectedOptions).map((option) => option.value);
+            ytDlpState.selectedSubtitleLanguages = selections;
+        });
     }
 
     if (openModalButton) {
@@ -1294,6 +1253,10 @@ function setupYtDlpForm() {
 
     if (modalDownloadButton) {
         modalDownloadButton.addEventListener('click', () => {
+            if (ytDlpState.mode === 'subtitles') {
+                handleYtDlpDownload(null);
+                return;
+            }
             if (!qualityList) {
                 return;
             }
@@ -1307,7 +1270,7 @@ function setupYtDlpForm() {
     }
 
     attachSubmit('yt-dlp-form', async () => {
-        const payload = buildYtDlpPayload('json');
+        const payload = buildYtDlpPayload('metadata');
         const response = await fetch('/media/yt-dlp', {
             method: 'POST',
             headers: {
@@ -1321,10 +1284,161 @@ function setupYtDlpForm() {
         }
         ytDlpState.metadata = result.metadata;
         ytDlpState.rawResponse = result;
+        ytDlpState.availableSubtitles = result.available_subtitles || { original: [], auto: [] };
+        syncSubtitleLanguageSelection();
         renderYtDlpResults({ metadata: result.metadata, raw: result });
         setDownloadButtonsState(Array.isArray(result.metadata.formats) && result.metadata.formats.length > 0);
         showToast('Metadata retrieved successfully.');
     });
+
+    refreshYtDlpMode();
+}
+
+function refreshYtDlpMode() {
+    const dom = ytDlpState.dom || {};
+    const mode = ytDlpState.mode || 'video';
+    const openModalButton = dom.openModalButton;
+    const modalDownloadButton = dom.modalDownloadButton;
+    const subtitleControls = dom.subtitleControls;
+
+    if (subtitleControls) {
+        subtitleControls.hidden = mode !== 'subtitles';
+    }
+
+    if (openModalButton) {
+        openModalButton.textContent = mode === 'audio' ? 'Choose audio quality' : 'Choose download quality';
+        openModalButton.disabled = mode === 'subtitles' || !hasFormatsForCurrentMode();
+    }
+
+    if (modalDownloadButton) {
+        modalDownloadButton.textContent = mode === 'subtitles' ? 'Download subtitles' : 'Download selection';
+    }
+
+    setDownloadButtonsState(hasFormatsForCurrentMode());
+    if (mode === 'subtitles') {
+        syncSubtitleLanguageSelection();
+    }
+}
+
+function hasFormatsForCurrentMode() {
+    const metadata = ytDlpState.metadata;
+    if (!metadata || !Array.isArray(metadata.formats)) {
+        return false;
+    }
+    const mode = ytDlpState.mode || 'video';
+    return metadata.formats.some((format) => {
+        if (!format || typeof format !== 'object') {
+            return false;
+        }
+        if (mode === 'audio') {
+            return isAudioFormat(format);
+        }
+        if (mode === 'video') {
+            return isVideoFormat(format);
+        }
+        return false;
+    });
+}
+
+function syncSubtitleLanguageSelection() {
+    const dom = ytDlpState.dom || {};
+    const list = dom.subtitleLanguageList;
+    if (!list) {
+        return;
+    }
+
+    const availableSources = Object.entries(ytDlpState.availableSubtitles || {})
+        .filter(([, values]) => Array.isArray(values) && values.length)
+        .map(([key]) => key);
+    if (!availableSources.length) {
+        ytDlpState.selectedSubtitleLanguages = [];
+    }
+
+    if (!availableSources.includes(ytDlpState.selectedSubtitleSource)) {
+        ytDlpState.selectedSubtitleSource = availableSources[0] || 'original';
+    }
+
+    if (dom.subtitleControls) {
+        dom.subtitleControls
+            .querySelectorAll('input[name="yt-dlp-subtitle-source"]')
+            .forEach((radio) => {
+                radio.checked = radio.value === ytDlpState.selectedSubtitleSource;
+                radio.disabled = availableSources.length > 0 && !availableSources.includes(radio.value);
+            });
+    }
+
+    const source = ytDlpState.selectedSubtitleSource || 'original';
+    const available = ytDlpState.availableSubtitles[source] || [];
+    const previous = new Set(ytDlpState.selectedSubtitleLanguages || []);
+
+    list.innerHTML = '';
+
+    if (!available.length) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'No subtitles available yet';
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        list.appendChild(placeholder);
+        list.disabled = true;
+        ytDlpState.selectedSubtitleLanguages = [];
+        return;
+    }
+
+    list.disabled = false;
+    available.forEach((code) => {
+        const option = document.createElement('option');
+        option.value = code;
+        option.textContent = createLanguageOptionLabel(code);
+        option.selected = previous.size ? previous.has(code) : false;
+        list.appendChild(option);
+    });
+
+    if (!previous.size) {
+        ytDlpState.selectedSubtitleLanguages = [];
+    }
+}
+
+function normaliseDownloadMetadata(raw) {
+    if (!raw || typeof raw !== 'object') {
+        return {};
+    }
+    const skip = new Set(['filename', 'contentType', 'content_type', 'filesize']);
+    return Object.entries(raw).reduce((acc, [key, value]) => {
+        if (skip.has(key)) {
+            return acc;
+        }
+        if (value === null || value === undefined) {
+            return acc;
+        }
+        if (typeof value === 'object') {
+            try {
+                acc[key] = JSON.stringify(value);
+            } catch (error) {
+                acc[key] = String(value);
+            }
+        } else {
+            acc[key] = String(value);
+        }
+        return acc;
+    }, {});
+}
+
+function normaliseMediaUrl(raw) {
+    if (typeof raw !== 'string') {
+        return '';
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return '';
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (trimmed.startsWith('//')) {
+        return `https:${trimmed}`;
+    }
+    return `https://${trimmed}`;
 }
 
 function normaliseMediaUrl(raw) {
@@ -1360,12 +1474,13 @@ function buildYtDlpPayload(responseFormat, overrides = {}) {
     const payload = {
         url: normalisedUrl,
         response_format: responseFormat,
+        mode: ytDlpState.mode || 'video',
         options: {
             noplaylist: true
         }
     };
 
-    if (responseFormat === 'binary' && dom.filenameField && dom.filenameField.value.trim()) {
+    if (responseFormat === 'download' && dom.filenameField && dom.filenameField.value.trim()) {
         payload.filename = dom.filenameField.value.trim();
     }
 
@@ -1379,6 +1494,10 @@ function buildYtDlpPayload(responseFormat, overrides = {}) {
                 : '';
     if (formatValue) {
         payload.options.format = formatValue;
+    }
+
+    if (responseFormat === 'download' && typeof formatOverride === 'string' && formatOverride.trim().length) {
+        payload.format_id = formatOverride.trim();
     }
 
     if (dom.playlistItemsField && dom.playlistItemsField.value.trim()) {
@@ -1419,6 +1538,13 @@ function buildYtDlpPayload(responseFormat, overrides = {}) {
         }
     }
 
+    if (responseFormat === 'download' && ytDlpState.mode === 'subtitles') {
+        payload.subtitle_source = ytDlpState.selectedSubtitleSource || 'original';
+        if (Array.isArray(ytDlpState.selectedSubtitleLanguages) && ytDlpState.selectedSubtitleLanguages.length) {
+            payload.subtitle_languages = ytDlpState.selectedSubtitleLanguages;
+        }
+    }
+
     if (overrides.options && typeof overrides.options === 'object') {
         payload.options = { ...payload.options, ...overrides.options };
     }
@@ -1440,6 +1566,9 @@ function renderYtDlpResults(args = {}) {
         ytDlpState.metadata = null;
         ytDlpState.rawResponse = null;
         ytDlpState.downloadNodes = null;
+        if (ytDlpState.dom) {
+            ytDlpState.dom.downloadActionButton = null;
+        }
         setResult('media-results', []);
         setDownloadButtonsState(false);
         return;
@@ -1452,6 +1581,8 @@ function renderYtDlpResults(args = {}) {
     } else if (ytDlpState.rawResponse) {
         raw = ytDlpState.rawResponse;
     }
+
+    syncSubtitleLanguageSelection();
 
     if (download !== undefined) {
         ytDlpState.downloadNodes = download;
@@ -1518,10 +1649,26 @@ function renderYtDlpResults(args = {}) {
     const chooseButton = document.createElement('button');
     chooseButton.type = 'button';
     chooseButton.className = 'secondary-btn';
-    chooseButton.textContent = 'Choose download quality';
-    chooseButton.disabled = !hasFormats;
+    chooseButton.textContent = ytDlpState.mode === 'audio' ? 'Choose audio quality' : 'Choose download quality';
+    chooseButton.disabled = ytDlpState.mode === 'subtitles' ? true : !hasFormatsForCurrentMode();
     chooseButton.addEventListener('click', () => openYtDlpModal());
     actions.appendChild(chooseButton);
+
+    const downloadNowButton = document.createElement('button');
+    downloadNowButton.type = 'button';
+    downloadNowButton.className = 'primary-btn';
+    downloadNowButton.textContent = ytDlpState.mode === 'subtitles' ? 'Download subtitles' : 'Download selection';
+    downloadNowButton.addEventListener('click', () => {
+        if (ytDlpState.mode === 'subtitles') {
+            handleYtDlpDownload(null);
+        } else if (ytDlpState.selectedFormatId) {
+            handleYtDlpDownload(ytDlpState.selectedFormatId);
+        } else {
+            openYtDlpModal();
+        }
+    });
+    actions.appendChild(downloadNowButton);
+    ytDlpState.dom.downloadActionButton = downloadNowButton;
 
     if (subtitleLanguages.length > 1) {
         const subtitleFilter = createSubtitleFilterControl(subtitleLanguages, ytDlpState.subtitleLanguageFilter);
@@ -1532,17 +1679,11 @@ function renderYtDlpResults(args = {}) {
 
     const helper = document.createElement('p');
     helper.className = 'helper-text';
-    helper.textContent = hasFormats
-        ? 'Pick a quality to download or try a different recipe from the dropdown above.'
-        : 'No downloadable formats were reported, but raw metadata is available below.';
+    helper.textContent =
+        ytDlpState.mode === 'subtitles'
+            ? 'Use the subtitle controls in the form to choose a source and languages before downloading.'
+            : 'Pick a quality to download or customise the advanced options below.';
     actions.appendChild(helper);
-
-    if (raw && raw.shortcuts) {
-        const shortcuts = createShortcutLinks(raw.shortcuts);
-        if (shortcuts) {
-            actions.appendChild(shortcuts);
-        }
-    }
 
     summaryNodes.push(actions);
 
@@ -1574,14 +1715,58 @@ function renderYtDlpResults(args = {}) {
     }
 
     setResult('media-results', groups);
-    setDownloadButtonsState(hasFormats);
+    const hasRelevantFormats = ytDlpState.mode === 'subtitles' ? true : hasFormatsForCurrentMode();
+    setDownloadButtonsState(hasRelevantFormats);
 }
 
 function setDownloadButtonsState(enabled) {
     const dom = ytDlpState.dom || {};
+    const mode = ytDlpState.mode || 'video';
     if (dom.openModalButton) {
-        dom.openModalButton.disabled = !enabled;
+        dom.openModalButton.disabled = mode === 'subtitles' ? true : !enabled;
     }
+    if (dom.downloadActionButton) {
+        if (mode === 'subtitles') {
+            dom.downloadActionButton.disabled = false;
+            dom.downloadActionButton.textContent = 'Download subtitles';
+        } else {
+            dom.downloadActionButton.disabled = !enabled;
+            dom.downloadActionButton.textContent = 'Download selection';
+        }
+    }
+}
+
+function selectBestThumbnail(metadata) {
+    if (!metadata || typeof metadata !== 'object') {
+        return null;
+    }
+
+    if (metadata.thumbnail && typeof metadata.thumbnail === 'string') {
+        return metadata.thumbnail;
+    }
+
+    if (!Array.isArray(metadata.thumbnails)) {
+        return null;
+    }
+
+    const sorted = metadata.thumbnails
+        .filter((entry) => entry && typeof entry.url === 'string')
+        .map((entry) => ({
+            url: entry.url,
+            width: Number(entry.width) || 0,
+            height: Number(entry.height) || 0,
+        }))
+        .filter((entry) => entry.url.length)
+        .sort((a, b) => {
+            const aScore = (a.width || 0) * (a.height || 0);
+            const bScore = (b.width || 0) * (b.height || 0);
+            if (aScore === bScore) {
+                return (b.width || 0) - (a.width || 0);
+            }
+            return bScore - aScore;
+        });
+
+    return sorted.length ? sorted[0].url : null;
 }
 
 function selectBestThumbnail(metadata) {
@@ -1644,6 +1829,13 @@ function buildYtDlpDownloadNodes(download) {
         if (directLink) {
             nodes.push(directLink);
         }
+    }
+
+    if (download.filename && !download.blob) {
+        const summary = document.createElement('p');
+        summary.className = 'helper-text';
+        summary.textContent = `Stored as ${download.filename}`;
+        nodes.push(summary);
     }
 
     if (download.meta && typeof download.meta === 'object' && !Array.isArray(download.meta)) {
@@ -1753,7 +1945,19 @@ function populateYtDlpModal(formats) {
     }
 
     qualityList.innerHTML = '';
-    const options = normaliseYtDlpFormats(formats);
+    if (ytDlpState.mode === 'subtitles') {
+        ytDlpState.formatsById = new Map();
+        const message = document.createElement('p');
+        message.className = 'helper-text';
+        message.textContent = 'Subtitles will be collected using the language and source settings from the form.';
+        qualityList.appendChild(message);
+        if (downloadButton) {
+            downloadButton.disabled = false;
+        }
+        return;
+    }
+
+    const options = normaliseYtDlpFormats(formats, ytDlpState.mode);
     ytDlpState.formatsById = new Map(options.map((option) => [option.id, option.original]));
 
     if (!options.length) {
@@ -1809,7 +2013,7 @@ function populateYtDlpModal(formats) {
     }
 }
 
-function normaliseYtDlpFormats(formats) {
+function normaliseYtDlpFormats(formats, mode = 'video') {
     if (!Array.isArray(formats)) {
         return [];
     }
@@ -1823,7 +2027,15 @@ function normaliseYtDlpFormats(formats) {
         if (!format.format_id || seen.has(format.format_id)) {
             return false;
         }
-        if (!isVideoFormat(format) && !isAudioFormat(format)) {
+        const video = isVideoFormat(format);
+        const audio = isAudioFormat(format);
+        if (!video && !audio) {
+            return false;
+        }
+        if (mode === 'video' && !video) {
+            return false;
+        }
+        if (mode === 'audio' && !audio) {
             return false;
         }
         seen.add(format.format_id);
@@ -1833,7 +2045,7 @@ function normaliseYtDlpFormats(formats) {
     filtered.sort((a, b) => {
         const aVideo = isVideoFormat(a);
         const bVideo = isVideoFormat(b);
-        if (aVideo !== bVideo) {
+        if (aVideo !== bVideo && mode !== 'audio') {
             return aVideo ? -1 : 1;
         }
 
@@ -1901,15 +2113,30 @@ function updateYtDlpQualitySelection(formatId) {
 
     downloadButton.disabled = false;
     downloadButton.textContent = buildYtDlpDownloadLabel(ytDlpState.formatsById.get(formatId));
+    setDownloadButtonsState(hasFormatsForCurrentMode());
 }
 
 async function handleYtDlpDownload(formatId) {
     const dom = ytDlpState.dom || {};
-    const downloadButton = dom.modalDownloadButton;
-    if (!formatId) {
-        return;
+    const mode = ytDlpState.mode || 'video';
+    let effectiveFormatId = formatId;
+
+    if (mode !== 'subtitles') {
+        if (!effectiveFormatId) {
+            effectiveFormatId = ytDlpState.selectedFormatId || null;
+        }
+        if (!effectiveFormatId) {
+            showToast('Pick a quality before downloading.', 'error');
+            return;
+        }
+        if (!ytDlpState.formatsById.has(effectiveFormatId)) {
+            showToast('Select a valid format to download.', 'error');
+            return;
+        }
+        ytDlpState.selectedFormatId = effectiveFormatId;
     }
 
+    const downloadButton = dom.modalDownloadButton;
     const originalLabel = downloadButton ? downloadButton.textContent : null;
     if (downloadButton) {
         downloadButton.disabled = true;
@@ -1917,32 +2144,23 @@ async function handleYtDlpDownload(formatId) {
     }
 
     try {
-        if (!ytDlpState.formatsById.has(formatId)) {
-            throw new Error('Select a valid format to download.');
-        }
-        const payload = buildYtDlpPayload('binary', { formatOverride: formatId });
+        const payload = buildYtDlpPayload('download', { formatOverride: effectiveFormatId });
         const jobId = generateYtDlpJobId();
         payload.job_id = jobId;
         startYtDlpDownloadProgress();
         openYtDlpProgressStream(jobId);
-        const { blob, response } = await fetchBinaryWithProgress(
-            '/media/yt-dlp',
-            {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
+
+        const response = await fetch('/media/yt-dlp', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             },
-            (loaded, total) => updateYtDlpDownloadProgress(loaded, total, { stage: 'downloading' })
-        );
+            body: JSON.stringify(payload)
+        });
+
+        const result = await parseResponse(response);
         completeYtDlpDownloadProgress('Download ready');
         closeYtDlpProgressStream();
-        const selectedFormat = ytDlpState.formatsById.get(formatId) || null;
-        const filename =
-            payload.filename ||
-            parseFilename(response.headers.get('Content-Disposition')) ||
-            buildFilenameFromMetadata(ytDlpState.metadata, selectedFormat);
 
         const directUrl = buildDirectDownloadUrl({ url: payload.url, format: formatId, filename });
         const contentType = response.headers.get('Content-Type') || undefined;
@@ -1955,21 +2173,11 @@ async function handleYtDlpDownload(formatId) {
             directLabel: 'Open API download link'
         };
 
-        if (selectedFormat) {
-            const downloadMeta = {};
-            downloadMeta['Format ID'] = selectedFormat.format_id;
-            if (selectedFormat.ext) {
-                downloadMeta.Container = `.${selectedFormat.ext}`;
-            }
-            const qualityLabel = buildYtDlpFormatLabel(selectedFormat);
-            if (qualityLabel) {
-                downloadMeta.Quality = qualityLabel;
-            }
-            const reportedSize = selectedFormat.filesize || selectedFormat.filesize_approx;
-            if (reportedSize) {
-                downloadMeta['Reported size'] = formatBytes(reportedSize) || `${reportedSize} bytes`;
-            }
-            downloadState.meta = downloadMeta;
+        if (downloadInfo.metadata && typeof downloadInfo.metadata === 'object') {
+            downloadState.meta = {
+                ...downloadState.meta,
+                ...normaliseDownloadMetadata(downloadInfo.metadata)
+            };
         }
 
         closeYtDlpModal();
@@ -1980,11 +2188,13 @@ async function handleYtDlpDownload(formatId) {
         failYtDlpDownloadProgress(error.message || 'Download failed');
         closeYtDlpProgressStream();
         showToast(error.message || 'Download failed', 'error');
-        return;
     } finally {
         closeYtDlpProgressStream();
         if (downloadButton) {
-            const fallback = downloadButton.dataset.originalLabel || originalLabel || 'Download selection';
+            const fallback =
+                downloadButton.dataset.originalLabel ||
+                originalLabel ||
+                (mode === 'subtitles' ? 'Download subtitles' : 'Download selection');
             downloadButton.textContent = fallback;
             downloadButton.disabled = false;
         }
@@ -2968,55 +3178,6 @@ function createSubtitleList(entries, languageFilter) {
     return wrapper;
 }
 
-function createShortcutLinks(shortcuts) {
-    const entries = Object.entries(shortcuts || {}).filter(([, href]) => typeof href === 'string' && href.length);
-    if (!entries.length) {
-        return null;
-    }
-
-    const wrapper = document.createElement('div');
-    wrapper.className = 'yt-dlp-shortcuts';
-
-    const label = document.createElement('span');
-    label.textContent = 'Quick API links';
-    wrapper.appendChild(label);
-
-    entries.forEach(([key, href]) => {
-        const link = document.createElement('a');
-        link.href = toAbsoluteUrl(href);
-        link.target = '_blank';
-        link.rel = 'noreferrer';
-        const label = YT_DLP_SHORTCUT_LABELS[key] || key;
-        link.textContent = label;
-        link.title = `Download using the ${label.toLowerCase()} preset`;
-        wrapper.appendChild(link);
-    });
-
-    return wrapper;
-}
-
-function toAbsoluteUrl(href) {
-    if (!href) {
-        return '';
-    }
-    try {
-        return new URL(href, window.location.origin).toString();
-    } catch (error) {
-        return href;
-    }
-}
-
-function buildDirectDownloadUrl({ url, format, filename }) {
-    if (!url || !format) {
-        return null;
-    }
-    const params = new URLSearchParams({ url, format });
-    if (filename) {
-        params.set('filename', filename);
-    }
-    return `/media/yt-dlp/direct?${params.toString()}`;
-}
-
 function formatBytes(bytes) {
     const value = Number(bytes);
     if (!Number.isFinite(value) || value <= 0) {
@@ -3127,8 +3288,14 @@ function createDownloadLinkFromUrl(href, label = 'Open download link') {
     if (!href) {
         return null;
     }
+    let resolvedHref = href;
+    try {
+        resolvedHref = new URL(href, window.location.origin).toString();
+    } catch (error) {
+        console.warn('Failed to normalise download URL', error);
+    }
     const link = document.createElement('a');
-    link.href = toAbsoluteUrl(href);
+    link.href = resolvedHref;
     link.target = '_blank';
     link.rel = 'noreferrer';
     link.className = 'download-link is-outline';
