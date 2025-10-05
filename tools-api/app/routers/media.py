@@ -7,14 +7,14 @@ import json
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Literal
+from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, constr, field_validator
 
-from app.services.download_store import StoredDownload, download_store
 from app.services.progress_manager import progress_manager
 from app.services.yt_dlp_service import DownloadResult, YtDlpServiceError, yt_dlp_service
 from app.utils.logger import logger
@@ -22,20 +22,28 @@ from app.utils.logger import logger
 router = APIRouter(prefix="/media", tags=["media-tools"])
 
 
-class YtDlpResponseFormat(str, Enum):
-    metadata = "metadata"
-    download = "download"
+class YtDlpShortcut(str, Enum):
+    """Predefined yt-dlp recipes exposed as quick API endpoints."""
 
-
-class YtDlpDownloadMode(str, Enum):
-    video = "video"
+    best = "best"
+    fhd = "fhd"
     audio = "audio"
-    subtitles = "subtitles"
 
 
-class YtDlpSubtitleSource(str, Enum):
-    original = "original"
-    auto = "auto"
+SHORTCUT_PRESETS: Dict[YtDlpShortcut, Dict[str, Any]] = {
+    YtDlpShortcut.best: {
+        "description": "Best available video with audio merged.",
+        "options": {"format": "bestvideo*+bestaudio/best", "noplaylist": True},
+    },
+    YtDlpShortcut.fhd: {
+        "description": "1080p video when available, falling back to the closest match.",
+        "options": {"format": "bv*[height<=1080]+ba/b[height<=1080]", "noplaylist": True},
+    },
+    YtDlpShortcut.audio: {
+        "description": "Audio-only download using the best available track.",
+        "options": {"format": "bestaudio/best", "noplaylist": True},
+    },
+}
 
 
 class YtDlpOptions(BaseModel):
@@ -132,29 +140,13 @@ class YtDlpRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     url: AnyHttpUrl = Field(..., description="URL understood by yt-dlp.")
-    response_format: YtDlpResponseFormat = Field(
-        default=YtDlpResponseFormat.metadata,
-        description="Return metadata or persist a download for retrieval.",
+    response_format: Literal["json", "binary"] = Field(
+        default="json",
+        description="Return metadata as JSON (default) or stream the downloaded media as binary.",
     )
     filename: str | None = Field(
         default=None,
         description="Optional filename to use when returning binary content. Defaults to yt-dlp's detected name.",
-    )
-    mode: YtDlpDownloadMode | None = Field(
-        default=None,
-        description="Download mode to execute when response_format='download'.",
-    )
-    format_id: str | None = Field(
-        default=None,
-        description="Specific yt-dlp format identifier selected from metadata.",
-    )
-    subtitle_languages: list[str] | None = Field(
-        default=None,
-        description="Subtitle language codes to download when mode='subtitles'.",
-    )
-    subtitle_source: YtDlpSubtitleSource = Field(
-        default=YtDlpSubtitleSource.original,
-        description="Use original author subtitles or automatically generated captions.",
     )
     options: YtDlpOptions = Field(default_factory=YtDlpOptions, description="Advanced yt-dlp options.")
     job_id: constr(strip_whitespace=True, min_length=4, max_length=64, pattern=r"^[A-Za-z0-9_-]+$") | None = Field(
@@ -195,24 +187,15 @@ class YtDlpRequest(BaseModel):
 
 class YtDlpMetadataResponse(BaseModel):
     metadata: Dict[str, Any]
-    available_subtitles: Dict[str, list[str]] = Field(
-        default_factory=dict,
-        description="Convenience map listing subtitle languages grouped by source type.",
+    shortcuts: Dict[str, str] | None = Field(
+        default=None,
+        description="Quick download URLs for common video/audio recipes.",
     )
 
 
-class YtDlpDownloadDescriptor(BaseModel):
-    id: str
-    filename: str
-    content_type: str
-    filesize: int
-    url: str
-    metadata: Dict[str, Any]
-
-
-class YtDlpDownloadResponse(BaseModel):
-    metadata: Dict[str, Any]
-    download: YtDlpDownloadDescriptor
+def _content_disposition(filename: str) -> str:
+    encoded = quote(filename)
+    return f"attachment; filename*=UTF-8''{encoded}"
 
 
 def _metadata_header(metadata: Dict[str, Any]) -> str:
@@ -220,80 +203,40 @@ def _metadata_header(metadata: Dict[str, Any]) -> str:
     return base64.b64encode(json_payload.encode("utf-8")).decode("utf-8")
 
 
-def _subtitle_language_map(metadata: Dict[str, Any]) -> Dict[str, list[str]]:
-    subtitles: Dict[str, Any] = {}
-    if isinstance(metadata.get("subtitles"), dict):
-        subtitles = metadata["subtitles"]
-
-    automatic: Dict[str, Any] = {}
-    if isinstance(metadata.get("automatic_captions"), dict):
-        automatic = metadata["automatic_captions"]
-
-    def _extract_languages(source: Dict[str, Any]) -> list[str]:
-        languages: set[str] = set()
-        for key, value in source.items():
-            if not key:
-                continue
-            languages.add(str(key))
-            if isinstance(value, dict):
-                alt = value.get("name")
-                if alt:
-                    languages.add(str(alt))
-        return sorted(languages)
-
-    payload: Dict[str, list[str]] = {}
-    original = _extract_languages(subtitles)
-    if original:
-        payload[YtDlpSubtitleSource.original.value] = original
-    automatic_languages = _extract_languages(automatic)
-    if automatic_languages:
-        payload[YtDlpSubtitleSource.auto.value] = automatic_languages
-    return payload
+def _shortcut_links(url: str) -> Dict[str, str]:
+    links: Dict[str, str] = {}
+    for preset in YtDlpShortcut:
+        if preset not in SHORTCUT_PRESETS:
+            continue
+        path = router.url_path_for("yt_dlp_quick_download", preset=preset.value)
+        links[preset.value] = f"{path}?{urlencode({'url': url})}"
+    return links
 
 
-async def _handle_download(request: YtDlpRequest, url: str, options: Dict[str, Any], http_request: Request) -> YtDlpDownloadResponse:
-    mode = request.mode or YtDlpDownloadMode.video
-    progress_job_id = request.job_id
+@router.post("/yt-dlp", response_model=YtDlpMetadataResponse)
+async def yt_dlp_endpoint(request: YtDlpRequest):
+    """Fetch metadata or download media using yt-dlp with safe defaults."""
 
-    if mode != YtDlpDownloadMode.subtitles and request.format_id:
-        options["format"] = request.format_id
-    elif mode == YtDlpDownloadMode.video:
-        options.setdefault("format", "bestvideo*+bestaudio/best")
-    elif mode == YtDlpDownloadMode.audio:
-        options.setdefault("format", "bestaudio/best")
-
-    progress_callback = None
-    if progress_job_id:
-        progress_manager.ensure_channel(progress_job_id)
-        progress_manager.publish(
-            progress_job_id,
-            {"type": "progress", "stage": "starting", "message": "Preparing download"},
-        )
-
-        def _progress_forwarder(event: Dict[str, Any]) -> None:
-            progress_manager.publish(progress_job_id, event)
-
-        progress_callback = _progress_forwarder
+    url = str(request.url)
+    options = request.options.to_yt_dlp_kwargs()
 
     try:
-        if mode == YtDlpDownloadMode.subtitles:
-            subtitle_options = dict(options)
-            if request.subtitle_languages:
-                subtitle_options["subtitleslangs"] = request.subtitle_languages
-            if request.subtitle_source == YtDlpSubtitleSource.auto:
-                subtitle_options["writeautomaticsub"] = True
-                subtitle_options.pop("writesubtitles", None)
-            else:
-                subtitle_options["writesubtitles"] = True
-                subtitle_options.pop("writeautomaticsub", None)
+        if request.response_format == "binary":
+            progress_job_id = request.job_id
+            progress_callback = None
 
-            download = await run_in_threadpool(
-                yt_dlp_service.download_subtitles,
-                url,
-                options=subtitle_options,
-                filename_override=request.filename,
-            )
-        else:
+            if progress_job_id:
+                progress_manager.ensure_channel(progress_job_id)
+                progress_manager.publish(
+                    progress_job_id,
+                    {"type": "progress", "stage": "starting", "message": "Preparing download"},
+                )
+
+                def _progress_forwarder(event: Dict[str, Any]) -> None:
+                    progress_manager.publish(progress_job_id, event)
+
+                progress_callback = _progress_forwarder
+
             download_kwargs: Dict[str, Any] = {
                 "options": options,
                 "filename_override": request.filename,
@@ -301,117 +244,112 @@ async def _handle_download(request: YtDlpRequest, url: str, options: Dict[str, A
             if progress_callback is not None:
                 download_kwargs["progress_callback"] = progress_callback
 
-            download = await run_in_threadpool(
-                yt_dlp_service.download,
-                url,
-                **download_kwargs,
-            )
-    except YtDlpServiceError as exc:
-        if progress_job_id:
-            progress_manager.publish(
-                progress_job_id,
-                {"type": "error", "stage": "failed", "message": str(exc)},
-            )
-        logger.error("yt-dlp request failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - guard against unexpected failures
-        if progress_job_id:
-            progress_manager.publish(
-                progress_job_id,
-                {"type": "error", "stage": "failed", "message": "Download failed"},
-            )
-        logger.exception("Unexpected yt-dlp failure")
-        raise
-    else:
-        if progress_job_id:
-            progress_manager.publish(
-                progress_job_id,
-                {"type": "progress", "stage": "packaging", "message": "Packaging download"},
-            )
-            progress_manager.publish(
-                progress_job_id,
-                {"type": "complete", "stage": "ready", "message": "Download ready"},
-            )
-    finally:
-        if progress_job_id:
-            progress_manager.close(progress_job_id)
+            try:
+                download: DownloadResult = await run_in_threadpool(
+                    yt_dlp_service.download,
+                    url,
+                    **download_kwargs,
+                )
+            except YtDlpServiceError as exc:
+                if progress_job_id:
+                    progress_manager.publish(
+                        progress_job_id,
+                        {"type": "error", "stage": "failed", "message": str(exc)},
+                    )
+                logger.error("yt-dlp request failed: %s", exc)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except Exception as exc:  # pragma: no cover - guard against unexpected failures
+                if progress_job_id:
+                    progress_manager.publish(
+                        progress_job_id,
+                        {"type": "error", "stage": "failed", "message": "Download failed"},
+                    )
+                logger.exception("Unexpected yt-dlp failure")
+                raise
+            else:
+                if progress_job_id:
+                    progress_manager.publish(
+                        progress_job_id,
+                        {"type": "progress", "stage": "packaging", "message": "Packaging download"},
+                    )
+                    progress_manager.publish(
+                        progress_job_id,
+                        {"type": "complete", "stage": "ready", "message": "Download ready"},
+                    )
+            finally:
+                if progress_job_id:
+                    progress_manager.close(progress_job_id)
 
-    download.metadata = download.metadata or {}
-    download.metadata.setdefault("mode", mode.value)
-
-    stored = _persist_download(download)
-    return _build_download_response(stored, download.metadata, http_request)
-
-
-def _persist_download(download: DownloadResult) -> StoredDownload:
-    metadata = dict(jsonable_encoder(download.metadata or {}))
-    metadata.setdefault("filename", download.filename)
-    metadata.setdefault("content_type", download.content_type)
-    metadata.setdefault("filesize", len(download.content))
-    stored = download_store.store(
-        filename=download.filename,
-        content=download.content,
-        content_type=download.content_type,
-        metadata=metadata,
-    )
-    return stored
-
-
-def _build_download_response(stored: StoredDownload, metadata: Dict[str, Any], request: Request) -> YtDlpDownloadResponse:
-    download_url = str(request.url_for("yt_dlp_download_file", file_id=stored.file_id))
-    download_payload = YtDlpDownloadDescriptor(
-        id=stored.file_id,
-        filename=stored.filename,
-        content_type=stored.content_type,
-        filesize=stored.path.stat().st_size,
-        url=download_url,
-        metadata=jsonable_encoder(stored.metadata),
-    )
-    return YtDlpDownloadResponse(
-        metadata=jsonable_encoder(metadata),
-        download=download_payload,
-    )
-
-
-@router.get("/yt-dlp/files/{file_id}")
-async def yt_dlp_download_file(file_id: str):
-    try:
-        stored = download_store.retrieve(file_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Download not found") from exc
-
-    response = FileResponse(
-        stored.path,
-        media_type=stored.content_type,
-        filename=stored.filename,
-    )
-    response.headers["X-YtDlp-Metadata"] = _metadata_header(stored.metadata)
-    return response
-
-
-@router.post("/yt-dlp", response_model=YtDlpMetadataResponse | YtDlpDownloadResponse)
-async def yt_dlp_endpoint(payload: YtDlpRequest, request: Request):
-    """Fetch metadata or persist media downloads using yt-dlp with safe defaults."""
-
-    url = str(payload.url)
-    options = payload.options.to_yt_dlp_kwargs()
-
-    try:
-        if payload.response_format == YtDlpResponseFormat.download:
-            if payload.mode is None:
-                raise HTTPException(status_code=400, detail="Download mode is required for downloads")
-
-            return await _handle_download(payload, url, options, request)
+            headers = {
+                "Content-Disposition": _content_disposition(download.filename),
+                "X-YtDlp-Metadata": _metadata_header(download.metadata),
+            }
+            return _BinaryResponse(download, headers)
 
         metadata = await run_in_threadpool(yt_dlp_service.extract_info, url, options=options)
-        available_subtitles = _subtitle_language_map(metadata)
-        return YtDlpMetadataResponse(
-            metadata=jsonable_encoder(metadata),
-            available_subtitles=available_subtitles,
-        )
+        shortcuts = _shortcut_links(url)
+        return YtDlpMetadataResponse(metadata=jsonable_encoder(metadata), shortcuts=shortcuts)
     except YtDlpServiceError as exc:
         logger.error("yt-dlp request failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/yt-dlp/quick/{preset}")
+async def yt_dlp_quick_download(preset: YtDlpShortcut, url: AnyHttpUrl, filename: str | None = None):
+    """Download media using a predefined shortcut recipe."""
+
+    config = SHORTCUT_PRESETS.get(preset)
+    if not config:
+        raise HTTPException(status_code=404, detail="Unknown yt-dlp shortcut preset.")
+
+    options = dict(config.get("options", {}))
+
+    try:
+        download: DownloadResult = await run_in_threadpool(
+            yt_dlp_service.download,
+            str(url),
+            options=options,
+            filename_override=filename,
+        )
+    except YtDlpServiceError as exc:
+        logger.error("yt-dlp quick preset %s failed: %s", preset.value, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    headers = {
+        "Content-Disposition": _content_disposition(download.filename),
+        "X-YtDlp-Metadata": _metadata_header(download.metadata),
+    }
+    return _BinaryResponse(download, headers)
+
+
+@router.get("/yt-dlp/direct")
+async def yt_dlp_direct_download(url: AnyHttpUrl, format: str, filename: str | None = None):
+    """Download media by specifying a yt-dlp format selector directly via query string."""
+
+    options = {"format": format, "noplaylist": True}
+
+    try:
+        download: DownloadResult = await run_in_threadpool(
+            yt_dlp_service.download,
+            str(url),
+            options=options,
+            filename_override=filename,
+        )
+    except YtDlpServiceError as exc:
+        logger.error("yt-dlp direct download failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    headers = {
+        "Content-Disposition": _content_disposition(download.filename),
+        "X-YtDlp-Metadata": _metadata_header(download.metadata),
+    }
+    return _BinaryResponse(download, headers)
+
+
+def _BinaryResponse(result: DownloadResult, headers: Dict[str, str]):
+    from fastapi import Response
+
+    return Response(content=result.content, media_type=result.content_type, headers=headers)
 
 
 @router.get("/yt-dlp/progress/{job_id}")

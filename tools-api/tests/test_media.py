@@ -1,17 +1,12 @@
 import base64
-import io
 import json
-import zipfile
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import app.routers.media as media_router
 from app.main import app
-from app.services.download_store import DownloadStore
-import app.services.yt_dlp_service as yt_dlp_module
-from app.services.yt_dlp_service import DownloadResult, YtDlpService
+from app.services.yt_dlp_service import DownloadResult
 
 
 @pytest.fixture
@@ -19,20 +14,12 @@ def client():
     return TestClient(app)
 
 
-@pytest.fixture
-def temp_download_store(monkeypatch, tmp_path):
-    store = DownloadStore(root=tmp_path)
-    monkeypatch.setattr(media_router, "download_store", store)
-    return store
-
-
 def test_yt_dlp_metadata_endpoint(client, monkeypatch):
     sample_metadata = {
         "id": "demo",
         "title": "Sample",
         "duration": 10,
-        "subtitles": {"en": [{"ext": "vtt", "url": "https://example.com/subs.vtt"}]},
-        "automatic_captions": {"es": [{"ext": "vtt", "url": "https://example.com/auto.vtt"}]},
+        "requested_subtitles": {"en": {"ext": "vtt", "url": "https://example.com/subs.vtt"}},
     }
 
     def fake_extract(url: str, *, options):
@@ -68,11 +55,9 @@ def test_yt_dlp_metadata_endpoint(client, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["metadata"] == sample_metadata
-    assert payload["available_subtitles"]["original"] == ["en"]
-    assert payload["available_subtitles"]["auto"] == ["es"]
 
 
-def test_yt_dlp_download_endpoint(client, monkeypatch, temp_download_store):
+def test_yt_dlp_binary_endpoint(client, monkeypatch):
     metadata = {"id": "demo", "title": "Sample", "ext": "mp4"}
 
     def fake_download(url: str, *, options, filename_override=None):
@@ -90,27 +75,17 @@ def test_yt_dlp_download_endpoint(client, monkeypatch, temp_download_store):
         "/media/yt-dlp",
         json={
             "url": "https://example.com/video",
-            "response_format": "download",
-            "mode": "video",
+            "response_format": "binary",
             "filename": "custom.mp4",
         },
     )
 
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["metadata"]["title"] == "Sample"
-    download = payload["download"]
-    assert download["filename"] == "custom.mp4"
-    file_id = download["id"]
-    stored_file = temp_download_store.root / file_id / "custom.mp4"
-    assert stored_file.exists()
-    assert stored_file.read_bytes() == b"video-bytes"
+    assert response.content == b"video-bytes"
+    assert response.headers["content-type"] == "video/mp4"
+    assert response.headers["Content-Disposition"].endswith("custom.mp4")
 
-    file_response = client.get(f"/media/yt-dlp/files/{file_id}")
-    assert file_response.status_code == 200
-    assert file_response.content == b"video-bytes"
-    assert file_response.headers["content-type"] == "video/mp4"
-    metadata_header = file_response.headers.get("X-YtDlp-Metadata")
+    metadata_header = response.headers.get("X-YtDlp-Metadata")
     assert metadata_header is not None
     decoded = json.loads(base64.b64decode(metadata_header))
     assert decoded["title"] == "Sample"
