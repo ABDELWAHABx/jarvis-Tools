@@ -1,5 +1,36 @@
 const config = window.__STUDIO_CONFIG__ || {};
 const OPENAPI_URL = config.openapiUrl || '/openapi.json';
+const API_BASE_URL = (() => {
+    try {
+        const resolved = new URL(OPENAPI_URL, window.location.href);
+        let basePath = resolved.pathname.replace(/\/openapi\.json(?:\?.*)?$/i, '/');
+        if (!basePath.endsWith('/')) {
+            basePath += '/';
+        }
+        return `${resolved.origin}${basePath}`;
+    } catch (error) {
+        console.warn('Unable to derive API base URL from OpenAPI configuration. Falling back to window origin.', error);
+        return `${window.location.origin}/`;
+    }
+})();
+
+function resolveApiUrl(path = '') {
+    if (typeof path !== 'string') {
+        return API_BASE_URL;
+    }
+
+    const trimmed = path.trim();
+    if (!trimmed) {
+        return API_BASE_URL;
+    }
+
+    if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed) || trimmed.startsWith('//')) {
+        return trimmed;
+    }
+
+    const normalised = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+    return new URL(normalised, API_BASE_URL).toString();
+}
 const toastState = { timer: null };
 let endpointCatalogue = null;
 const ytDlpState = {
@@ -244,7 +275,7 @@ function setupDocxForm() {
             throw new Error('Select a DOCX file first.');
         }
 
-        const response = await fetch('/docx/parse', {
+        const response = await fetch(resolveApiUrl('/docx/parse'), {
             method: 'POST',
             headers: {
                 'Content-Type': file.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -278,7 +309,7 @@ function setupHalationsForm() {
         formData.append('brightness_threshold', document.getElementById('brightness-slider').value);
         formData.append('strength', document.getElementById('strength-slider').value);
 
-        const response = await fetch('/image-tools/halations?response_format=json', {
+        const response = await fetch(resolveApiUrl('/image-tools/halations?response_format=json'), {
             method: 'POST',
             body: formData
         });
@@ -335,7 +366,7 @@ function setupBeforeAfterForm() {
             formData.append('add_text', 'false');
         }
 
-        const response = await fetch('/image-tools/before-after?response_format=json', {
+        const response = await fetch(resolveApiUrl('/image-tools/before-after?response_format=json'), {
             method: 'POST',
             body: formData
         });
@@ -380,7 +411,7 @@ function setupPanosplitterForm() {
         const highResCheckbox = document.getElementById('panosplitter-highres');
         formData.append('high_res', highResCheckbox && highResCheckbox.checked ? 'true' : 'false');
 
-        const response = await fetch('/js-tools/panosplitter?response_format=json', {
+        const response = await fetch(resolveApiUrl('/js-tools/panosplitter?response_format=json'), {
             method: 'POST',
             body: formData
         });
@@ -680,7 +711,7 @@ function setupCobaltShortcuts() {
                         payload.response_format = responseFormat;
                     }
 
-                    const response = await fetch(`/js-tools/cobalt/shortcuts/${shortcut}`, {
+                    const response = await fetch(resolveApiUrl(`/js-tools/cobalt/shortcuts/${shortcut}`), {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -1121,7 +1152,7 @@ function setupCobaltForm() {
             Object.assign(payload, extraPayload);
         }
 
-        const response = await fetch('/js-tools/cobalt', {
+        const response = await fetch(resolveApiUrl('/js-tools/cobalt'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1273,7 +1304,7 @@ function setupYtDlpForm() {
 
     attachSubmit('yt-dlp-form', async () => {
         const payload = buildYtDlpPayload('metadata');
-        const response = await fetch('/media/yt-dlp', {
+        const response = await fetch(resolveApiUrl('/media/yt-dlp'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -2127,7 +2158,7 @@ async function handleYtDlpDownload(formatId) {
         startYtDlpDownloadProgress();
         openYtDlpProgressStream(jobId);
 
-        const response = await fetch('/media/yt-dlp', {
+        const response = await fetch(resolveApiUrl('/media/yt-dlp'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -2541,7 +2572,8 @@ async function withButtonLoading(button, callback) {
 }
 
 async function postJSON(url, payload) {
-    const response = await fetch(url, {
+    const target = resolveApiUrl(url);
+    const response = await fetch(target, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -2578,9 +2610,10 @@ async function parseBinaryResponse(response) {
 }
 
 async function fetchBinaryWithProgress(url, options, onProgress) {
+    const targetUrl = resolveApiUrl(url);
     let response;
     try {
-        response = await fetch(url, options);
+        response = await fetch(targetUrl, options);
     } catch (error) {
         throw new Error('Network error while fetching media. Please try again.');
     }
@@ -2661,7 +2694,7 @@ function openYtDlpProgressStream(jobId) {
 
     closeYtDlpProgressStream();
 
-    const url = `/media/yt-dlp/progress/${encodeURIComponent(jobId)}`;
+    const url = resolveApiUrl(`/media/yt-dlp/progress/${encodeURIComponent(jobId)}`);
 
     try {
         const source = new EventSource(url);
