@@ -108,11 +108,18 @@ def _catalog_services() -> Tuple[List[Dict[str, Any]], Optional[str]]:
     for service in services_raw:
         if not isinstance(service, dict):
             continue
+        flow = service.get("flow")
+        if isinstance(flow, list):
+            flow_steps = [str(step).strip() for step in flow if str(step).strip()]
+        else:
+            flow_steps = []
+
         entry = {
             "name": service.get("name", "Unnamed Service"),
             "summary": service.get("summary"),
             "docs_url": service.get("docs_url"),
             "endpoints": [],
+            "flow": flow_steps,
         }
         endpoints = service.get("endpoints", [])
         if isinstance(endpoints, list):
@@ -159,6 +166,12 @@ def _documentation_lines() -> Iterable[str]:
         docs_url = service.get("docs_url")
         if docs_url:
             yield f"   Interactive docs: {docs_url}"
+
+        flow_steps: List[str] = service.get("flow", []) if isinstance(service.get("flow"), list) else []
+        if flow_steps:
+            yield "   Workflow:"
+            for step in flow_steps:
+                yield f"     - {step}"
 
         endpoints: List[Dict[str, Any]] = service.get("endpoints", [])
         if endpoints:
@@ -251,6 +264,12 @@ def render_request_overview(host: str, port: int) -> str:
         summary = service.get("summary")
         if summary:
             lines.append(f"  {summary}")
+
+        flow_steps = service.get("flow") if isinstance(service.get("flow"), list) else []
+        if flow_steps:
+            lines.append("  Workflow:")
+            for step in flow_steps:
+                lines.append(f"    - {step}")
 
         for endpoint in service.get("endpoints", []):
             descriptor = f"  • {endpoint['headline']} — {endpoint['method']} {endpoint['path']}"

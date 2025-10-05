@@ -1,160 +1,191 @@
 # Tools API
 
-**Automate document-heavy workflows without building bespoke microservices.** Tools API is the FastAPI-powered backbone for automation teams and operations engineers who need reliable parsing, conversion, and document generation capabilities for AI agents and human-in-the-loop processes.
+Tools API is a FastAPI application that bundles document conversion, media helpers, and JavaScript-backed utilities behind a single REST API. It was built so non-developers can upload files or paste URLs, while automations and AI agents receive clean, well-documented responses.
 
----
+## What you get out of the box
+- **Rich text parsers** that turn HTML or Markdown into Google Docs `batchUpdate` requests.
+- **Google Docs + DOCX extraction** for pulling plain text, links, and metadata out of exported files.
+- **Image tooling** for halation glows and before/after promos with optional MP4 output.
+- **JavaScript bridges** to the bundled panorama splitter and Cobalt-powered media downloads.
+- **yt-dlp orchestration** with progress streaming, persistent download links, and subtitle helpers.
+- **Studio web UI** at `/` for running every tool without writing curl commands—now root-path aware so it works when the API is mounted behind `/tools` or similar prefixes.
 
-## Why Tools API?
-- **Ship new automations faster.** Drop in ready-made endpoints for HTML, Markdown, and Docx so your n8n or Zapier flows can launch in hours, not sprints.
-- **Guarantee formatting fidelity.** Preserve fonts, colors, lists, tables, and more when converting between rich text formats and Google Docs.
-- **Scale with confidence.** Async endpoints, modular architecture, and Docker-ready deployment keep workflows resilient across teams and environments.
+## Prerequisites
+| Requirement | Why it is needed |
+| --- | --- |
+| Python 3.11+ | Runs the FastAPI application and worker. |
+| pip | Installs Python dependencies from `requirements.txt`. |
+| Node.js 18+ & npm | Required the first time you call the JavaScript panorama splitter or Cobalt bridge (Tools API auto-runs `npm install`). |
+| Optional: `imageio-ffmpeg` or system FFmpeg | Enables MP4 output for the before/after animation tool. |
+| Optional: Redis | Needed only if you wire Tools API into an external Redis-backed queue. The bundled `run_all.py` script uses the in-process queue by default. |
 
-> *"Tools API saved us weeks of internal API development. We connected it to our agent workflows in a day and never looked back."* — Lead Automation Engineer, Series B SaaS company
+## Quick start (no prior backend experience required)
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/<your-org>/jarvis-Tools.git
+   cd jarvis-Tools/tools-api
+   ```
+2. **Create a virtual environment** (keeps packages isolated)
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   ```
+3. **Install dependencies**
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+4. **(Optional) Prepare JavaScript helpers** – Install Node.js 18+ and npm. Tools API will run `npm install` the first time the panorama splitter or Cobalt bridge is used, but you can also prime it manually:
+   ```bash
+   cd js_tools/panosplitter
+   npm install
+   cd ../..
+   ```
+5. **Run the API**
+   - Fastest way: `uvicorn app.main:app --reload`
+   - One-command bundle (API + local worker + documentation banner): `python run_all.py`
+6. **Open the Studio** – Visit `http://localhost:8000/` for the drag-and-drop dashboard or `http://localhost:8000/docs` for Swagger UI.
 
----
+> **Tip:** The Studio now reads the OpenAPI URL to determine the correct base path, so the buttons keep working even when Tools API sits behind a reverse proxy at `/tools` or similar.
 
-## Pain Points We Solve
-| For Automation Leads | For Operations Engineers | For Platform Owners |
-| --- | --- | --- |
-| Keeping agents aligned with brand formatting | Maintaining brittle in-house parsing scripts | Delivering new document tooling without slowing core roadmap |
-| Handling countless conversion edge cases | Supporting varied file types and legacy systems | Providing governance and observability across teams |
-| Orchestrating async workloads reliably | Debugging asynchronous queue workers | Balancing cost, reliability, and security expectations |
+## Service walkthrough
+Each section below includes an example call you can paste into a terminal. Replace placeholder values as needed.
 
----
-
-## Feature Showcase
-- **Rich Text Conversion Engine** – Translate HTML or Markdown into Google Docs operations with full styling fidelity ([rich_text_guide](./rich_text_guide.md)).
-- **Docx Toolkit** – Parse uploaded `.docx` files into plain text or generate `.docx` documents from JSON payloads.
-- **Queue-Ready Workflows** – Built-in Redis + RQ worker enables durable background processing for large document jobs.
-- **Modular Architecture** – Add new tool routers quickly; see [code_flow.md](./code_flow.md) for an overview.
-- **JavaScript Tool Bridge** – Wrap Node.js utilities (like the panorama splitter and Cobalt media downloader) in Python-friendly REST endpoints with binary-friendly delivery for n8n.
-- **Media Toolkit** – Use the bundled yt-dlp endpoint to inspect streams or fetch downloadable media with automation-ready headers.
-- **Observability Hooks** – Centralized logging and error handling give SRE and platform teams the visibility they expect.
-
-```mermaid
-graph TD
-    A[Automation Trigger] -->|HTML/Markdown| B(Parse Endpoints)
-    B --> C{Tools API}
-    C -->|Google Docs Ops| D[Docs Creation]
-    C -->|Plain Text| E[AI Agents]
-    C -->|Docx Output| F[Stakeholders]
-    C -->|Async Job| G[(Redis Queue)]
-    G --> H[Worker]
-    H --> F
-```
-
----
-
-## Proof in Practice
-- **OpsHub (Case Study)** – Replaced fragile custom scripts with Tools API, cutting document prep time by 65% and freeing two engineers per quarter.
-- **Global Support Org (Testimonial)** – *"Our agents format escalation reports flawlessly now. Tools API handles every edge case we throw at it."*
-
----
-
-## Quick Start CTA
-1. **Spin it up locally** – `uvicorn app.main:app --reload`
-2. **Hit the live docs** – Visit `http://localhost:8000/docs` to try endpoints instantly.
-3. **Plug into your automation** – Connect to n8n or your agent framework via simple HTTP requests.
-
-👉 **Ready for a deeper dive?** [Book a 15-minute walkthrough](mailto:hello@toolsapi.io?subject=Tools%20API%20Walkthrough) or share it with your automation lead.
-
----
-
-## Live Demos & Resources
-- **Interactive API Docs:** `http://localhost:8000/docs`
-- **Rich Text Examples:** See the [rich text guide](./rich_text_guide.md)
-- **Cobalt Integration Guide:** Configure a Cobalt instance for media downloads via `/js-tools/cobalt` (see below).
-- **Queue Worker Walkthrough:** Explore `worker.py` for background job orchestration.
-
----
-
-## Engineer's Appendix
-### Install
+### 1. Rich text parsers
+Convert HTML or Markdown to Google Docs operations.
 ```bash
-pip install -r requirements.txt
+curl -X POST http://localhost:8000/parse/html \
+  -H "Content-Type: application/json" \
+  -d '{"html": "<h1>Launch Plan</h1><p>Automate everything.</p>"}'
 ```
+- Use `/parse/docs/html` or `/parse/docs/markdown` for synchronous conversions that skip the queue.
+- Offload heavy conversions with `/parse/queue/html` (or `/parse/queue/markdown`) and poll `/parse/job/<job_id>` until `status` becomes `finished`.
+- Feed the returned `requests` array directly into the Google Docs `documents.batchUpdate` API.
 
-### Run Locally
+### 2. Google Docs JSON parser
+Extract plain text, hyperlinks, and image references from a Docs JSON export.
 ```bash
-uvicorn app.main:app --reload
+curl -X POST http://localhost:8000/parse/gdocs/json \
+  -H "Content-Type: application/json" \
+  -d '{"content": {/* paste the Google Docs JSON export here */}}'
 ```
-
-### JavaScript-powered tools
-Some endpoints rely on Node.js tooling. Install Node 18+ and npm so the API can install dependencies on first run:
-
+To upload a `.json` file you exported from Google Docs:
 ```bash
-# Example: ensure dependencies for the bundled panorama splitter are installed
-cd tools-api/js_tools/panosplitter
-npm install
+curl -X POST http://localhost:8000/parse/gdocs/file \
+  -F "file=@MyDoc.json"
 ```
 
-When the API boots it will run `npm install` for you if `node_modules/` is missing.
+### 3. DOCX toolkit
+Stream a DOCX file and receive clean text plus metadata.
+```bash
+curl -X POST http://localhost:8000/docx/parse \
+  -H "Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document" \
+  --data-binary @proposal.docx
+```
 
-#### Binary responses & n8n compatibility
-- **Panosplitter:** add `response_format=binary` to receive a ready-to-share `.zip` archive. The archive now includes a `manifest.json` file for metadata, and the API echoes a `X-Panosplitter-Manifest` header (base64 JSON) that n8n can decode without parsing the body.
-- **Cobalt downloads:** set `response_format=binary` on `/js-tools/cobalt` to stream media directly for n8n's binary items. The response contains a `Content-Disposition` header plus `X-Cobalt-Metadata` with the originating JSON payload.
+### 4. Image effects
+Generate halation glows or before/after promos.
+```bash
+# Halations glow (JSON response with base64 JPEG)
+curl -X POST "http://localhost:8000/image-tools/halations?response_format=json" \
+  -F "image=@portrait.jpg"
 
-#### Cobalt media downloader
-Expose an existing [Cobalt](https://github.com/imputnet/cobalt) deployment through Tools API:
+# Before/after animation (binary MP4 download)
+curl -X POST "http://localhost:8000/image-tools/before-after?response_format=binary" \
+  -F "before_image=@old.png" \
+  -F "after_image=@new.png" \
+  -o promo.mp4
+```
+If FFmpeg (via `imageio-ffmpeg`) is installed, the before/after tool returns MP4; otherwise it falls back to GIF.
 
+### 5. JavaScript tool bridge
+Split panoramas or proxy Cobalt downloads through Python-friendly endpoints.
+```bash
+# Panorama splitter (zip archive response)
+curl -X POST "http://localhost:8000/js-tools/panosplitter" \
+  -F "image=@wide-shot.jpg" \
+  -F "high_res=false" \
+  -o panosplitter.zip
+
+# Cobalt proxy (JSON response)
+curl -X POST http://localhost:8000/js-tools/cobalt \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+```
+Cobalt shortcuts (`/js-tools/cobalt/shortcuts/{slug}`) let you trigger presets such as `youtube-audio` or `metadata-only` with the same request body. Configure the gateway with:
 ```bash
 export COBALT_API_BASE_URL="https://your-cobalt-instance.example"
-# Optional authentication if your instance requires it
+# Optional auth
 export COBALT_API_AUTH_SCHEME="Api-Key"
 export COBALT_API_AUTH_TOKEN="your-token"
-# Optional timeout override (seconds)
-export COBALT_API_TIMEOUT="90"
 ```
+If the environment variables are missing, Tools API falls back to the public `https://co.wuk.sh/api/json` endpoint and/or the local yt-dlp helper.
 
-If `COBALT_API_BASE_URL` is omitted, Tools API automatically proxies through the public `https://co.wuk.sh/api/json` endpoint so you can test downloads out of the box. Set `COBALT_API_BASE_URL=disabled` when you want to turn the integration off entirely.
-
-Once configured you can `POST /js-tools/cobalt` with any options supported by Cobalt's schema (for example `audioFormat`, `videoQuality`, or service-specific flags). Default responses return the raw JSON from Cobalt. Include `{"response_format": "binary"}` to download the media bytes directly via Tools API.
-
-> Tip: Tools API Studio ships with a dedicated Cobalt card so you can paste a URL, mix and match presets, tweak audio/video formats, toggle service-specific flags, add custom key/value pairs, or fall back to raw JSON—no curl gymnastics required.
-
-Need an even faster hand-off for automations? Use the shortcut endpoints:
-
-- `POST /js-tools/cobalt/shortcuts/youtube-audio` – 320 kbps MP3 download.
-- `POST /js-tools/cobalt/shortcuts/youtube-video` – 1080p H.264 MP4 download.
-- `POST /js-tools/cobalt/shortcuts/instagram-story` – Instagram reels/stories as MP4.
-- `POST /js-tools/cobalt/shortcuts/metadata-only` – Fetch the JSON manifest without downloading media.
-
-Each shortcut accepts the same JSON body as `/js-tools/cobalt` (at minimum a `url`) and honours `response_format` (`json` or `binary`) plus `download_filename` for binary requests. These routes are ideal for n8n, Tasker, or webhook automations that just need a ready-to-use media URL or stream.
-
-#### yt-dlp media helper
-Tools API now ships with a thin wrapper around [yt-dlp](https://github.com/yt-dlp/yt-dlp) for quick metadata lookups or direct downloads:
-
+### 6. Media toolkit (yt-dlp)
+Fetch metadata, stream downloads, and monitor progress.
 ```bash
+# Request metadata and available formats
 curl -X POST http://localhost:8000/media/yt-dlp \
   -H "Content-Type: application/json" \
   -d '{
         "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        "options": {"format": "bestvideo+bestaudio/best"}
+        "response_format": "json"
       }'
+
+# Trigger a download with progress streaming
+JOB_ID="download-$(date +%s)"
+curl -X POST http://localhost:8000/media/yt-dlp \
+  -H "Content-Type: application/json" \
+  -d '{
+        "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "response_format": "binary",
+        "job_id": "'"$JOB_ID"'",
+        "mode": "video"
+      }' \
+  -o video.bin
+
+# Watch live progress events
+curl -N http://localhost:8000/media/yt-dlp/progress/$JOB_ID
 ```
+When `response_format` is `binary`, the response headers include:
+- `Content-Disposition` – suggested filename.
+- `X-YtDlp-Metadata` – base64 JSON that mirrors the metadata payload.
 
-- Default responses return the full yt-dlp metadata, perfect for agent reasoning or UI previews.
-- Set `"response_format": "binary"` to receive the media stream directly. The response includes `Content-Disposition` and `X-YtDlp-Metadata` headers to keep n8n or Zapier automations informed about the download.
-- Pass optional headers (cookies, auth) or proxy settings via the `options` object to handle restricted content.
-- Target specific playlist entries with `playlist_items` and enable subtitle workflows using `writesubtitles`, `writeautomaticsub`, and `subtitleslangs`. The Studio surfaces subtitle metadata alongside JSON and binary responses so you can link caption downloads in one click.
-
-### Docker
+The JSON response also contains a `download` descriptor. You can re-fetch the stored asset later:
 ```bash
-docker-compose up --build
+curl -o saved.mp4 http://localhost:8000/media/yt-dlp/files/<file_id>
 ```
 
-### Background Worker
-```bash
-# Start Redis (example using Docker)
-docker run -d --name redis -p 6379:6379 redis:7
+## Configuration reference
+Most behaviour is driven by environment variables. The most common ones are listed below.
 
-# Start the worker
-python worker.py
-```
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `TOOLS_API_HOST` / `TOOLS_API_PORT` | Host and port used by `python run_all.py`. | `127.0.0.1` / `8000` |
+| `COBALT_API_BASE_URL` | Remote Cobalt instance URL. Set to `disabled` to turn the integration off. | Public fallback (`https://co.wuk.sh/api/json`) |
+| `COBALT_API_AUTH_SCHEME` / `COBALT_API_AUTH_TOKEN` | Optional auth forwarded to your Cobalt deployment. | unset |
+| `COBALT_API_TIMEOUT` | Seconds before Cobalt requests time out. | `90` |
+| `MEDIA_DOWNLOAD_DIR` | Directory for yt-dlp download cache. | `app/downloads/` |
 
-### Tests
+A full natural-language catalogue of every endpoint lives in [`docs/service_catalog.yaml`](docs/service_catalog.yaml). The documentation printer (`python run_all.py`) and CLI both read from this file, so keep it updated when you add new services.
+
+## Testing and linting
 ```bash
 pytest
 ```
+All tests pass without external services; network calls are mocked.
 
-Need to extend Tools API? Follow the patterns documented in [code_flow.md](./code_flow.md) and submit improvements via pull request.
+## Troubleshooting
+- **Studio buttons submit but nothing happens** – ensure Node.js is installed for JavaScript-backed tools and refresh. The Studio now auto-detects the API base path, so reverse proxies no longer break form submissions.
+- **Panorama splitter errors about Node/npm** – confirm `node` and `npm` are on your `PATH`, then re-run the request. The API installs dependencies automatically the first time.
+- **Before/after returns GIF instead of MP4** – install `imageio-ffmpeg` (`pip install imageio-ffmpeg`) or make sure FFmpeg is available on the system.
+- **yt-dlp download fails** – check the server logs for the detailed error message and ensure the URL is accessible from the host machine.
+
+## Want to extend Tools API?
+Read [`code_flow.md`](code_flow.md) for the architectural overview, then update:
+1. `app/services/` – add your pure Python logic.
+2. `app/routers/` – expose HTTP endpoints with clear request/response models.
+3. `docs/service_catalog.yaml` – document the workflow so operators know how to use it.
+4. `tests/` – add or update tests and run `pytest`.
+
+Happy building! Tools API is designed to keep content workflows approachable for both automation engineers and non-developers.
