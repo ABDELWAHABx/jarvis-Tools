@@ -1441,6 +1441,23 @@ function normaliseMediaUrl(raw) {
     return `https://${trimmed}`;
 }
 
+function normaliseMediaUrl(raw) {
+    if (typeof raw !== 'string') {
+        return '';
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return '';
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (trimmed.startsWith('//')) {
+        return `https:${trimmed}`;
+    }
+    return `https://${trimmed}`;
+}
+
 function buildYtDlpPayload(responseFormat, overrides = {}) {
     const dom = ytDlpState.dom || {};
     const urlField = dom.urlField;
@@ -1752,6 +1769,39 @@ function selectBestThumbnail(metadata) {
     return sorted.length ? sorted[0].url : null;
 }
 
+function selectBestThumbnail(metadata) {
+    if (!metadata || typeof metadata !== 'object') {
+        return null;
+    }
+
+    if (metadata.thumbnail && typeof metadata.thumbnail === 'string') {
+        return metadata.thumbnail;
+    }
+
+    if (!Array.isArray(metadata.thumbnails)) {
+        return null;
+    }
+
+    const sorted = metadata.thumbnails
+        .filter((entry) => entry && typeof entry.url === 'string')
+        .map((entry) => ({
+            url: entry.url,
+            width: Number(entry.width) || 0,
+            height: Number(entry.height) || 0,
+        }))
+        .filter((entry) => entry.url.length)
+        .sort((a, b) => {
+            const aScore = (a.width || 0) * (a.height || 0);
+            const bScore = (b.width || 0) * (b.height || 0);
+            if (aScore === bScore) {
+                return (b.width || 0) - (a.width || 0);
+            }
+            return bScore - aScore;
+        });
+
+    return sorted.length ? sorted[0].url : null;
+}
+
 function buildYtDlpDownloadNodes(download) {
     if (!download) {
         return [];
@@ -1762,6 +1812,16 @@ function buildYtDlpDownloadNodes(download) {
     }
 
     const nodes = [];
+
+    if (download.blob) {
+        const preview = createMediaPreviewFromBlob(download.blob, download.contentType, download.filename);
+        if (preview) {
+            nodes.push(preview);
+        }
+
+        const label = download.blobLabel || 'Download media';
+        nodes.push(createDownloadLinkFromBlob(download.blob, download.filename, label));
+    }
 
     if (download.directUrl) {
         const label = download.directLabel || 'Open download link';
@@ -2102,23 +2162,15 @@ async function handleYtDlpDownload(formatId) {
         completeYtDlpDownloadProgress('Download ready');
         closeYtDlpProgressStream();
 
-        if (!result || !result.download) {
-            throw new Error('yt-dlp did not return a stored download.');
-        }
-
-        ytDlpState.metadata = result.metadata || ytDlpState.metadata;
-        ytDlpState.rawResponse = result;
-
-        const downloadInfo = result.download;
+        const directUrl = buildDirectDownloadUrl({ url: payload.url, format: formatId, filename });
+        const contentType = response.headers.get('Content-Type') || undefined;
         const downloadState = {
-            directUrl: downloadInfo.url,
-            directLabel: 'Open download link',
-            filename: downloadInfo.filename,
-            meta: {
-                'Stored file ID': downloadInfo.id,
-                'Content type': downloadInfo.content_type,
-                'File size': formatBytes(downloadInfo.filesize) || `${downloadInfo.filesize} bytes`
-            }
+            blob,
+            filename,
+            blobLabel: 'Download media',
+            contentType,
+            directUrl,
+            directLabel: 'Open API download link'
         };
 
         if (downloadInfo.metadata && typeof downloadInfo.metadata === 'object') {

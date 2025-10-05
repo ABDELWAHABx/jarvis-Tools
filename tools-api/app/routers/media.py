@@ -11,7 +11,7 @@ from typing import Any, Dict, Literal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, constr, field_validator
 
 from app.services.download_store import StoredDownload, download_store
@@ -191,30 +191,6 @@ class YtDlpRequest(BaseModel):
         if not safe_name:
             raise ValueError("filename must contain a valid file name")
         return safe_name
-
-    @field_validator("response_format", mode="before")
-    @classmethod
-    def _normalise_response_format(cls, value: Any):
-        if isinstance(value, str):
-            normalised = value.strip().lower()
-            if normalised in {"json", "metadata"}:
-                return YtDlpResponseFormat.metadata
-            if normalised in {"binary", "download"}:
-                return YtDlpResponseFormat.download
-        return value
-
-    @field_validator("subtitle_languages", mode="before")
-    @classmethod
-    def _parse_subtitle_list(cls, value: Any):
-        if value is None:
-            return None
-        if isinstance(value, list):
-            cleaned = [str(item).strip() for item in value if str(item).strip()]
-            return cleaned or None
-        if isinstance(value, str):
-            parts = [item.strip() for item in value.split(",") if item.strip()]
-            return parts or None
-        raise ValueError("subtitle_languages must be a list or comma separated string")
 
 
 class YtDlpMetadataResponse(BaseModel):
