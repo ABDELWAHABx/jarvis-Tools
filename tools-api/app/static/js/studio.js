@@ -1443,6 +1443,23 @@ function normaliseMediaUrl(raw) {
     return `https://${trimmed}`;
 }
 
+function normaliseMediaUrl(raw) {
+    if (typeof raw !== 'string') {
+        return '';
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return '';
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    if (trimmed.startsWith('//')) {
+        return `https:${trimmed}`;
+    }
+    return `https://${trimmed}`;
+}
+
 function buildYtDlpPayload(responseFormat, overrides = {}) {
     const dom = ytDlpState.dom || {};
     const urlField = dom.urlField;
