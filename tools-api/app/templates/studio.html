@@ -488,44 +488,20 @@
                         <form id="yt-dlp-form" class="tool-form">
                             <div class="form-header">
                                 <h3>yt-dlp Inspector</h3>
-                                <p class="muted">Preview the media details, then decide if you want video, audio, or subtitles.</p>
+                                <p class="muted">Preview the media details, then pick a ready-made download recipe.</p>
                             </div>
                             <label for="yt-dlp-url">URL</label>
                             <input id="yt-dlp-url" type="url" required placeholder="https://www.youtube.com/watch?v=..." />
 
-                            <div class="field-group">
-                                <span class="field-label">Download type</span>
-                                <div id="yt-dlp-mode-toggle" class="pill-toggle">
-                                    <label class="pill-option">
-                                        <input type="radio" name="yt-dlp-mode" value="video" checked />
-                                        <span>Video</span>
-                                    </label>
-                                    <label class="pill-option">
-                                        <input type="radio" name="yt-dlp-mode" value="audio" />
-                                        <span>Audio</span>
-                                    </label>
-                                    <label class="pill-option">
-                                        <input type="radio" name="yt-dlp-mode" value="subtitles" />
-                                        <span>Subtitles</span>
-                                    </label>
-                                </div>
-                                <p class="helper-text">Switch modes before downloading to tailor the controls below.</p>
-                            </div>
-                            <div id="yt-dlp-subtitle-controls" class="subtitle-controls" hidden>
-                                <div class="field-row">
-                                    <label class="radio">
-                                        <input type="radio" name="yt-dlp-subtitle-source" value="original" checked />
-                                        <span>Original subtitles</span>
-                                    </label>
-                                    <label class="radio">
-                                        <input type="radio" name="yt-dlp-subtitle-source" value="auto" />
-                                        <span>Auto translated</span>
-                                    </label>
-                                </div>
-                                <label for="yt-dlp-subtitle-language-list">Languages</label>
-                                <select id="yt-dlp-subtitle-language-list" multiple size="6"></select>
-                                <p class="helper-text">Pick one or more subtitle tracks. Leave empty to use the first available option.</p>
-                            </div>
+                            <label for="yt-dlp-template">Quick recipe</label>
+                            <select id="yt-dlp-template">
+                                <option value="best">Best quality video</option>
+                                <option value="hd1080">HD 1080p (if available)</option>
+                                <option value="audio">Audio only</option>
+                                <option value="subtitles">Grab subtitles</option>
+                                <option value="custom">Custom setup</option>
+                            </select>
+                            <p id="yt-dlp-template-hint" class="helper-text"></p>
 
                             <div class="form-actions">
                                 <button type="submit" class="primary-btn">Preview media info</button>

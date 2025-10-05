@@ -755,92 +755,6 @@ textarea {
     margin: 4px 0 0;
 }
 
-.pill-toggle {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.pill-option {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-}
-
-.pill-option input {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-}
-
-.pill-option span {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px 14px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(255, 255, 255, 0.06);
-    font-size: 0.85rem;
-    color: var(--muted);
-    transition: background 0.2s ease, border 0.2s ease, color 0.2s ease;
-}
-
-.pill-option input:checked + span {
-    background: rgba(79, 139, 255, 0.2);
-    border-color: rgba(79, 139, 255, 0.5);
-    color: var(--text);
-}
-
-.subtitle-controls {
-    display: grid;
-    gap: 12px;
-    margin-top: 12px;
-    padding: 14px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: var(--radius-sm);
-    background: rgba(255, 255, 255, 0.04);
-}
-
-.subtitle-controls .field-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    align-items: center;
-}
-
-.subtitle-controls .radio {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
-}
-
-.subtitle-controls select {
-    width: 100%;
-    min-height: 140px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: var(--radius-sm);
-    color: var(--text);
-    padding: 8px 10px;
-    font-size: 0.85rem;
-}
-
-.field-group {
-    display: grid;
-    gap: 8px;
-    margin-top: 12px;
-}
-
-.field-group .field-label {
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--muted);
-}
-
 .yt-dlp-subtitle-filter {
     display: flex;
     align-items: center;
@@ -856,6 +770,36 @@ textarea {
     color: var(--text);
     padding: 6px 10px;
     font-size: 0.85rem;
+}
+
+.yt-dlp-shortcuts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.yt-dlp-shortcuts span {
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.yt-dlp-shortcuts a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(79, 139, 255, 0.12);
+    border: 1px solid rgba(79, 139, 255, 0.35);
+    color: var(--text);
+    font-size: 0.8rem;
+    text-decoration: none;
+    transition: background 0.2s ease;
+}
+
+.yt-dlp-shortcuts a:hover {
+    background: rgba(79, 139, 255, 0.22);
 }
 
 .download-progress {

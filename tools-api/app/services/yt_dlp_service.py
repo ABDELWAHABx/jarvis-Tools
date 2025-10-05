@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import base64
-import io
 import json
 import mimetypes
 import tempfile
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict
 
 from app.utils.logger import logger
 
@@ -26,9 +24,6 @@ class DownloadResult:
     filename: str
     content_type: str
     metadata: Dict[str, Any]
-
-
-SUBTITLE_EXTENSIONS = {".vtt", ".srt", ".ass", ".lrc", ".ttml", ".json"}
 
 
 def _ensure_yt_dlp() -> Any:
@@ -154,75 +149,6 @@ class YtDlpService:
             metadata = self._serializable_metadata(info)
 
             return DownloadResult(content=content, filename=filename, content_type=content_type, metadata=metadata)
-
-    def download_subtitles(
-        self,
-        url: str,
-        *,
-        options: Dict[str, Any],
-        filename_override: str | None = None,
-    ) -> DownloadResult:
-        """Download only subtitle tracks and package them for delivery."""
-
-        yt_dlp = _ensure_yt_dlp()
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            merged_options = self._build_options(
-                {
-                    "skip_download": True,
-                    "outtmpl": str(tmp_path / "%(title)s.%(ext)s"),
-                    **options,
-                }
-            )
-
-            logger.debug("Downloading subtitles via yt-dlp for %s with options %s", url, merged_options)
-            try:
-                with yt_dlp.YoutubeDL(merged_options) as ydl:
-                    info = ydl.extract_info(url, download=True)
-            except Exception as exc:  # pragma: no cover - yt-dlp raises many custom errors
-                logger.error("yt-dlp subtitle download failed: %s", exc)
-                raise YtDlpServiceError(str(exc)) from exc
-
-            subtitle_files = self._collect_subtitle_files(tmp_path)
-            if not subtitle_files:
-                logger.error("yt-dlp did not produce any subtitle files")
-                raise YtDlpServiceError("No subtitles were downloaded for this request")
-
-            if len(subtitle_files) == 1:
-                subtitle_path = subtitle_files[0]
-                filename = filename_override or subtitle_path.name
-                content = subtitle_path.read_bytes()
-                content_type = mimetypes.guess_type(filename)[0] or "text/plain"
-            else:
-                archive = io.BytesIO()
-                with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-                    for subtitle_path in subtitle_files:
-                        zip_file.write(subtitle_path, arcname=subtitle_path.name)
-                filename = filename_override or "subtitles.zip"
-                content = archive.getvalue()
-                content_type = "application/zip"
-
-            metadata = self._serializable_metadata(info)
-            metadata.update(
-                {
-                    "subtitle_files": [path.name for path in subtitle_files],
-                    "mode": "subtitles",
-                }
-            )
-
-            return DownloadResult(content=content, filename=filename, content_type=content_type, metadata=metadata)
-
-    def _collect_subtitle_files(self, directory: Path) -> List[Path]:
-        files: List[Path] = []
-        for path in directory.iterdir():
-            if not path.is_file():
-                continue
-            if path.name == "metadata.json":
-                continue
-            if path.suffix.lower() in SUBTITLE_EXTENSIONS:
-                files.append(path)
-        return files
 
     def _normalise_progress_payload(self, payload: Dict[str, Any]) -> Dict[str, Any] | None:
         """Convert yt-dlp progress dictionaries into JSON serialisable summaries."""
