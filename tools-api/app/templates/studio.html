@@ -484,6 +484,30 @@
                     <p>Inspect or download media via yt-dlp without touching the command line.</p>
                 </header>
                 <div class="panel__body grid two-column">
+                    <div class="card">
+                        <form id="ffmpeg-convert-form" class="tool-form">
+                            <div class="form-header">
+                                <h3>FFmpeg Converter</h3>
+                                <p class="muted">Upload any supported media, choose input and output formats, and we will transcode it with FFmpeg.</p>
+                            </div>
+                            <label for="ffmpeg-from-format">From</label>
+                            <select id="ffmpeg-from-format">
+                                <option value="">Auto detect</option>
+                            </select>
+                            <label for="ffmpeg-to-format">To</label>
+                            <select id="ffmpeg-to-format" required></select>
+                            <label for="ffmpeg-file">Media file</label>
+                            <input id="ffmpeg-file" type="file" required />
+                            <p id="ffmpeg-format-status" class="helper-text">Loading FFmpeg formats…</p>
+                            <div class="form-actions">
+                                <button type="button" class="text-btn" id="ffmpeg-refresh-formats">Refresh formats</button>
+                                <button type="submit" class="primary-btn">Convert</button>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="card">
+                        <div id="ffmpeg-results" class="result-panel" aria-live="polite"></div>
+                    </div>
                     <div class="card span-two">
                         <form id="yt-dlp-form" class="tool-form">
                             <div class="form-header">

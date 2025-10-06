@@ -54,6 +54,11 @@ const ytDlpState = {
 
 const YT_DLP_PREVIEW_SIZE_LIMIT = 75 * 1024 * 1024;
 
+const ffmpegState = {
+    formats: null,
+    loading: false
+};
+
 const COBALT_FIELD_IDS = {
     service: 'cobalt-service',
     downloadMode: 'cobalt-download-mode',
@@ -151,7 +156,8 @@ function initialiseResultPanels() {
         'docx-results': 'Upload a DOCX file to extract text.',
         'image-results': 'Generate a glow or before/after clip to preview the output.',
         'js-results': 'Split a panorama or proxy a Cobalt download to inspect generated assets.',
-        'media-results': 'Inspect a media URL with yt-dlp to reveal metadata, downloads, and subtitles.'
+        'media-results': 'Inspect a media URL with yt-dlp to reveal metadata, downloads, and subtitles.',
+        'ffmpeg-results': 'Upload a file and convert it with FFmpeg.'
     };
 
     Object.entries(placeholders).forEach(([id, message]) => {
@@ -214,6 +220,7 @@ function setupForms() {
     setupPanosplitterForm();
     setupCobaltControls();
     setupCobaltForm();
+    setupFfmpegForm();
     setupYtDlpForm();
 }
 
@@ -395,6 +402,135 @@ function setupBeforeAfterForm() {
 
         setResult('image-results', [createResultGroup('Before/After Clip', elements)]);
         showToast('Before/after animation generated.');
+    });
+}
+
+function setupFfmpegForm() {
+    const form = document.getElementById('ffmpeg-convert-form');
+    if (!form) {
+        return;
+    }
+
+    const fromSelect = document.getElementById('ffmpeg-from-format');
+    const toSelect = document.getElementById('ffmpeg-to-format');
+    const fileInput = document.getElementById('ffmpeg-file');
+    const refreshButton = document.getElementById('ffmpeg-refresh-formats');
+    const status = document.getElementById('ffmpeg-format-status');
+    const submitButton = form.querySelector('[type="submit"]');
+
+    function setConversionEnabled(enabled) {
+        [fromSelect, toSelect, fileInput, submitButton].forEach((element) => {
+            if (element) {
+                element.disabled = !enabled;
+            }
+        });
+    }
+
+    async function refreshFormats(showToastMessage = false) {
+        if (ffmpegState.loading) {
+            return;
+        }
+        ffmpegState.loading = true;
+        const hadFormats = Boolean(
+            ffmpegState.formats &&
+                Array.isArray(ffmpegState.formats.outputs) &&
+                ffmpegState.formats.outputs.length
+        );
+        if (!hadFormats) {
+            setConversionEnabled(false);
+        }
+        if (status) {
+            status.textContent = 'Loading FFmpeg formats…';
+        }
+        try {
+            const data = await fetchFfmpegFormats();
+            ffmpegState.formats = data;
+            populateSelectOptions(fromSelect, data.inputs, {
+                placeholder: 'Auto detect',
+                disablePlaceholder: false
+            });
+            populateSelectOptions(toSelect, data.outputs, {
+                placeholder: 'Select output format',
+                disablePlaceholder: true
+            });
+            const hasOutputs = Array.isArray(data.outputs) && data.outputs.length > 0;
+            setConversionEnabled(hasOutputs);
+            if (status) {
+                status.textContent = hasOutputs
+                    ? `Loaded ${data.inputs.length} input and ${data.outputs.length} output formats.`
+                    : 'FFmpeg did not report any writable formats.';
+            }
+            if (showToastMessage) {
+                showToast('FFmpeg format catalogue refreshed.');
+            }
+        } catch (error) {
+            console.error(error);
+            if (status) {
+                status.textContent = error.message || 'Failed to load FFmpeg formats.';
+            }
+            if (!hadFormats) {
+                populateSelectOptions(toSelect, [], {
+                    placeholder: 'Select output format',
+                    disablePlaceholder: true
+                });
+                setConversionEnabled(false);
+            } else {
+                setConversionEnabled(true);
+            }
+            showToast(error.message || 'Failed to load FFmpeg formats.', 'error');
+        } finally {
+            ffmpegState.loading = false;
+        }
+    }
+
+    if (refreshButton) {
+        refreshButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            refreshFormats(true);
+        });
+    }
+
+    refreshFormats(false);
+
+    attachSubmit('ffmpeg-convert-form', async () => {
+        if (!toSelect || !toSelect.value) {
+            throw new Error('Choose the output format before converting.');
+        }
+        if (!fileInput || !fileInput.files || !fileInput.files.length) {
+            throw new Error('Upload a file to convert with FFmpeg.');
+        }
+
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('target_format', toSelect.value);
+        if (fromSelect && fromSelect.value) {
+            formData.append('source_format', fromSelect.value);
+        }
+
+        const response = await fetch(resolveApiUrl('/media/ffmpeg/convert'), {
+            method: 'POST',
+            body: formData
+        });
+
+        const blob = await parseBinaryResponse(response);
+        const disposition = response.headers.get('content-disposition');
+        const derivedName = deriveFfmpegFilename(file.name, toSelect.value);
+        const filename = extractFilenameFromContentDisposition(disposition) || derivedName;
+        const contentType = response.headers.get('content-type') || blob.type || 'application/octet-stream';
+
+        const downloadLink = createDownloadLinkFromBlob(blob, filename, 'Download converted file');
+        const meta = {
+            'Original filename': file.name,
+            'Selected source format': fromSelect && fromSelect.value ? fromSelect.value : 'Auto detect',
+            'Target format': toSelect.value,
+            'Output filename': filename,
+            'Output type': contentType,
+            'Output size': formatBytes(blob.size) || `${blob.size} bytes`
+        };
+
+        setResult('ffmpeg-results', [createResultGroup('FFmpeg Conversion', [downloadLink, createMetaGrid(meta)])]);
+        showToast('Media converted successfully.');
     });
 }
 
@@ -2592,6 +2728,37 @@ async function parseBinaryResponse(response) {
     return response.blob();
 }
 
+async function fetchFfmpegFormats() {
+    let response;
+    try {
+        response = await fetch(resolveApiUrl('/media/ffmpeg/formats'));
+    } catch (error) {
+        throw new Error('Unable to reach the FFmpeg formats endpoint.');
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    const isJSON = contentType.includes('application/json');
+    const payload = isJSON ? await response.json() : null;
+
+    if (!response.ok) {
+        if (payload) {
+            throw new Error(extractMessage(payload, response.status));
+        }
+        const text = isJSON ? '' : await response.text();
+        throw new Error(text || `Failed to load FFmpeg formats (${response.status})`);
+    }
+
+    if (!payload || !Array.isArray(payload.inputs) || !Array.isArray(payload.outputs)) {
+        throw new Error('FFmpeg format response was malformed.');
+    }
+
+    return {
+        inputs: payload.inputs.map((item) => String(item)),
+        outputs: payload.outputs.map((item) => String(item)),
+        common: Array.isArray(payload.common) ? payload.common.map((item) => String(item)) : []
+    };
+}
+
 async function fetchBinaryWithProgress(url, options, onProgress) {
     const targetUrl = resolveApiUrl(url);
     let response;
@@ -3298,6 +3465,72 @@ function formatBytes(bytes) {
     }
     const decimals = result >= 10 || unitIndex === 0 ? 0 : 1;
     return `${result.toFixed(decimals)} ${units[unitIndex]}`;
+}
+
+function populateSelectOptions(select, options, { placeholder = null, disablePlaceholder = true } = {}) {
+    if (!(select instanceof HTMLSelectElement)) {
+        return;
+    }
+    const currentValue = select.value;
+    select.innerHTML = '';
+
+    if (placeholder !== null) {
+        const placeholderOption = document.createElement('option');
+        placeholderOption.value = '';
+        placeholderOption.textContent = placeholder;
+        if (disablePlaceholder) {
+            placeholderOption.disabled = true;
+        }
+        placeholderOption.selected = true;
+        select.appendChild(placeholderOption);
+    }
+
+    options.forEach((value) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+    });
+
+    if (currentValue && options.includes(currentValue)) {
+        select.value = currentValue;
+    } else if (!disablePlaceholder && placeholder !== null) {
+        select.value = '';
+    }
+}
+
+function deriveFfmpegFilename(originalName, targetFormat) {
+    const formatPart = typeof targetFormat === 'string' && targetFormat.trim() ? targetFormat.trim().replace(/^\./, '') : 'bin';
+    if (typeof originalName === 'string' && originalName.trim()) {
+        const trimmed = originalName.trim();
+        const base = trimmed.includes('.') ? trimmed.replace(/\.[^.]+$/, '') : trimmed;
+        const safeBase = base || 'converted';
+        return `${safeBase}.${formatPart}`;
+    }
+    return `converted.${formatPart}`;
+}
+
+function extractFilenameFromContentDisposition(header) {
+    if (typeof header !== 'string' || !header) {
+        return null;
+    }
+    const utfMatch = header.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch && utfMatch[1]) {
+        try {
+            return decodeURIComponent(utfMatch[1]);
+        } catch (error) {
+            return utfMatch[1];
+        }
+    }
+    const quotedMatch = header.match(/filename="([^"]+)"/i);
+    if (quotedMatch && quotedMatch[1]) {
+        return quotedMatch[1];
+    }
+    const simpleMatch = header.match(/filename=([^;]+)/i);
+    if (simpleMatch && simpleMatch[1]) {
+        return simpleMatch[1].trim();
+    }
+    return null;
 }
 
 function createNotice(message) {
