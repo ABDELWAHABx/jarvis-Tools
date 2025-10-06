@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.extensions import local_queue_extension
-from app.routers import docx, gdocs_parser, image_tools, js_tools, media, parser
+from app.routers import docx, ffmpeg, gdocs_parser, image_tools, js_tools, media, parser
 from app.services.cobalt_gateway import CobaltError, create_gateway
 from app.services.cobalt_shortcuts import list_shortcuts
 from app.utils.logger import logger
@@ -147,6 +147,7 @@ async def log_requests(request: Request, call_next):
 # Routers
 app.include_router(parser.router, prefix="/parse", tags=["parser"])
 app.include_router(docx.router)  # Already has /docx prefix
+app.include_router(ffmpeg.router)
 app.include_router(gdocs_parser.router)
 app.include_router(js_tools.router)
 app.include_router(media.router)
