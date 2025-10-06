@@ -1,20 +1,22 @@
+import asyncio
+import sys
+import time
 from pathlib import Path
-
-from fastapi import FastAPI, Request, status
 from urllib.parse import urlparse
 
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from app.routers import docx, gdocs_parser, image_tools, js_tools, media, parser
-from app.extensions import local_queue_extension
-from app.utils.logger import logger
+
 from app.config import settings
+from app.extensions import local_queue_extension
+from app.routers import docx, gdocs_parser, image_tools, js_tools, media, parser
 from app.services.cobalt_gateway import CobaltError, create_gateway
 from app.services.cobalt_shortcuts import list_shortcuts
-import time
+from app.utils.logger import logger
 
 
 app = FastAPI(
@@ -22,6 +24,59 @@ app = FastAPI(
     version="1.0.0",
     description="API for document parsing, DOCX manipulation, and n8n integrations"
 )
+
+
+_default_asyncio_exception_handler = None
+_asyncio_handler_installed = False
+
+
+def _register_windows_connection_reset_handler() -> None:
+    """Suppress noisy WinError 10054 traces when clients close downloads early."""
+
+    global _default_asyncio_exception_handler, _asyncio_handler_installed
+
+    if _asyncio_handler_installed or not sys.platform.startswith("win"):
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # pragma: no cover - startup race when loop not ready yet
+        return
+
+    original_handler = loop.get_exception_handler()
+
+    def handler(current_loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
+            logger.debug("Ignoring client connection reset during download close")
+            return
+
+        if original_handler is not None:
+            original_handler(current_loop, context)
+        else:
+            current_loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+    _default_asyncio_exception_handler = original_handler
+    _asyncio_handler_installed = True
+
+
+def _restore_asyncio_exception_handler() -> None:
+    """Restore the default asyncio exception handler if we replaced it."""
+
+    global _default_asyncio_exception_handler, _asyncio_handler_installed
+
+    if not _asyncio_handler_installed:
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # pragma: no cover - during shutdown loop may be gone
+        return
+
+    loop.set_exception_handler(_default_asyncio_exception_handler)
+    _default_asyncio_exception_handler = None
+    _asyncio_handler_installed = False
 
 
 # Static and template configuration
@@ -138,6 +193,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_event():
     """Run on application startup."""
+    _register_windows_connection_reset_handler()
     logger.info("🚀 Tools API starting up...")
     logger.info(f"Environment: {settings.ENVIRONMENT if hasattr(settings, 'ENVIRONMENT') else 'production'}")
     logger.info(f"CORS enabled for all origins")
@@ -146,6 +202,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Run on application shutdown."""
+    _restore_asyncio_exception_handler()
     logger.info("🛑 Tools API shutting down...")
 
 
