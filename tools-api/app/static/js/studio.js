@@ -104,6 +104,7 @@ function init() {
     initialiseResultPanels();
     setupHalationsControls();
     setupBeforeAfterControls();
+    setupImagePreviews();
     setupForms();
     loadEndpointCatalogue();
 }
@@ -209,7 +210,6 @@ function initialiseResultPanels() {
     const placeholders = {
         'parser-results': 'Run a parser request to inspect Docs operations.',
         'docx-results': 'Upload a DOCX file to extract text.',
-        'image-results': 'Generate a glow or before/after clip to preview the output.',
         'js-results': 'Run the panorama splitter or Cobalt bridge to review generated assets.',
         'media-results': 'Inspect a media URL with yt-dlp to reveal metadata, downloads, and subtitles.',
         'ffmpeg-results': 'Upload a file and convert it with FFmpeg.'
@@ -218,9 +218,13 @@ function initialiseResultPanels() {
     Object.entries(placeholders).forEach(([id, message]) => {
         const container = document.getElementById(id);
         if (container && !container.children.length) {
-            const paragraph = document.createElement('p');
-            paragraph.textContent = message;
-            container.appendChild(paragraph);
+            renderPlaceholder(container, message);
+        }
+    });
+
+    document.querySelectorAll('[data-placeholder]').forEach((element) => {
+        if (!element.children.length) {
+            renderPlaceholder(element, element.dataset.placeholder || '');
         }
     });
 }
@@ -262,9 +266,91 @@ function setupBeforeAfterControls() {
         return;
     }
 
-    toggle.addEventListener('change', () => {
-        textarea.style.display = toggle.checked ? 'block' : 'none';
-    });
+    const sync = () => {
+        textarea.hidden = !toggle.checked;
+    };
+
+    toggle.addEventListener('change', sync);
+    sync();
+}
+
+function setupImagePreviews() {
+    setupHalationsPreview();
+    setupBeforeAfterPreview();
+}
+
+function setupHalationsPreview() {
+    const input = document.getElementById('halations-image');
+    if (!input) {
+        return;
+    }
+
+    const update = () => {
+        const file = input.files && input.files[0];
+        if (!file) {
+            setRegion('halations-preview', [], 'Upload an image to preview the glow input.');
+            return;
+        }
+
+        const card = createImagePreviewCard(file, { label: 'Glow source' });
+        const nodes = [];
+        if (card) {
+            nodes.push(card);
+        }
+        setRegion('halations-preview', nodes, 'Upload an image to preview the glow input.');
+    };
+
+    input.addEventListener('change', update);
+    update();
+}
+
+function setupBeforeAfterPreview() {
+    const beforeInput = document.getElementById('before-image');
+    const afterInput = document.getElementById('after-image');
+    if (!beforeInput || !afterInput) {
+        return;
+    }
+
+    const update = () => {
+        const beforeFile = beforeInput.files && beforeInput.files[0];
+        const afterFile = afterInput.files && afterInput.files[0];
+        const grid = document.createElement('div');
+        grid.className = 'preview-grid';
+
+        if (beforeFile) {
+            const beforeCard = createImagePreviewCard(beforeFile, { label: 'Before' });
+            if (beforeCard) {
+                grid.appendChild(beforeCard);
+            }
+        }
+
+        if (afterFile) {
+            const afterCard = createImagePreviewCard(afterFile, { label: 'After' });
+            if (afterCard) {
+                grid.appendChild(afterCard);
+            }
+        }
+
+        const nodes = [];
+        if (grid.children.length) {
+            nodes.push(grid);
+            if (!beforeFile || !afterFile) {
+                const hint = document.createElement('p');
+                hint.textContent = 'Add the remaining image to compare the swipe.';
+                nodes.push(hint);
+            }
+        }
+
+        setRegion(
+            'before-after-preview',
+            nodes,
+            'Upload both images to review the swipe composition.'
+        );
+    };
+
+    beforeInput.addEventListener('change', update);
+    afterInput.addEventListener('change', update);
+    update();
 }
 
 function setupForms() {
@@ -394,7 +480,7 @@ function setupHalationsForm() {
         }
         nodes.push(createMetaGrid(result.metadata));
 
-        setResult('image-results', [createResultGroup('Halations Glow Result', nodes)]);
+        setResult('halations-output', [createResultGroup('Halations Glow Result', nodes)]);
         showToast('Halations glow applied.');
     });
 }
@@ -455,7 +541,7 @@ function setupBeforeAfterForm() {
         }
         elements.push(createMetaGrid(result.metadata));
 
-        setResult('image-results', [createResultGroup('Before/After Clip', elements)]);
+        setResult('before-after-output', [createResultGroup('Before/After Clip', elements)]);
         showToast('Before/after animation generated.');
     });
 }
@@ -3227,20 +3313,39 @@ function extractMessage(payload, status) {
     return JSON.stringify(payload, null, 2);
 }
 
-function setResult(containerId, groups) {
+function setRegion(containerId, nodes, fallbackMessage) {
     const container = document.getElementById(containerId);
+    if (!container) {
+        return;
+    }
+    const message = fallbackMessage || container.dataset.placeholder || 'No output to display yet.';
+    replaceChildren(container, nodes, message);
+}
+
+function setResult(containerId, groups) {
+    setRegion(containerId, groups, 'No output to display yet.');
+}
+
+function replaceChildren(container, nodes, placeholderMessage) {
     if (!container) {
         return;
     }
     revokeObjectUrls(container);
     container.innerHTML = '';
-    if (!groups || !groups.length) {
-        const paragraph = document.createElement('p');
-        paragraph.textContent = 'No output to display yet.';
-        container.appendChild(paragraph);
+    const content = Array.isArray(nodes) ? nodes.filter(Boolean) : [];
+    if (!content.length) {
+        if (placeholderMessage) {
+            const paragraph = document.createElement('p');
+            paragraph.textContent = placeholderMessage;
+            container.appendChild(paragraph);
+        }
         return;
     }
-    groups.forEach((group) => container.appendChild(group));
+    content.forEach((node) => container.appendChild(node));
+}
+
+function renderPlaceholder(element, message) {
+    replaceChildren(element, [], message);
 }
 
 function createResultGroup(title, nodes) {
@@ -3654,6 +3759,77 @@ function createImageFromBase64(base64, contentType, altText = '') {
     img.src = url;
     img.dataset.objectUrl = url;
     return img;
+}
+
+function createPreviewImageFromFile(file, altText = '') {
+    const isFile = typeof File !== 'undefined' && file instanceof File;
+    const isBlob = typeof Blob !== 'undefined' && file instanceof Blob;
+    if (!isFile && !isBlob) {
+        return null;
+    }
+    const url = URL.createObjectURL(file);
+    const image = document.createElement('img');
+    image.src = url;
+    image.alt = altText || file.name || 'Selected image preview';
+    image.decoding = 'async';
+    image.loading = 'lazy';
+    image.dataset.objectUrl = url;
+    return image;
+}
+
+function createImagePreviewCard(file, { label } = {}) {
+    if (!file) {
+        return null;
+    }
+    const wrapper = document.createElement('div');
+    wrapper.className = 'preview-card';
+
+    const image = createPreviewImageFromFile(file, label || file.name || 'Image preview');
+    if (image) {
+        wrapper.appendChild(image);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'preview-meta';
+
+    if (label) {
+        const heading = document.createElement('strong');
+        heading.textContent = label;
+        meta.appendChild(heading);
+    }
+
+    if (file.name) {
+        const name = document.createElement('span');
+        name.textContent = file.name;
+        meta.appendChild(name);
+    }
+
+    const summary = describeFileForPreview(file);
+    if (summary) {
+        const details = document.createElement('span');
+        details.textContent = summary;
+        meta.appendChild(details);
+    }
+
+    wrapper.appendChild(meta);
+    return wrapper;
+}
+
+function describeFileForPreview(file) {
+    if (!file) {
+        return '';
+    }
+    const parts = [];
+    if (file.type) {
+        parts.push(file.type);
+    }
+    if (typeof file.size === 'number') {
+        const formatted = formatBytes(file.size) || `${file.size} bytes`;
+        if (formatted) {
+            parts.push(formatted);
+        }
+    }
+    return parts.join(' • ');
 }
 
 function createVideoFromBase64(base64, contentType, options = {}) {
