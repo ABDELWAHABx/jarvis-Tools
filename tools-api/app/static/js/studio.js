@@ -98,7 +98,8 @@ const languageDisplayNames =
         : null;
 
 function init() {
-    setupNavigation();
+    const setSidebarOpen = setupSidebarToggle();
+    setupNavigation(setSidebarOpen);
     setupSectionObserver();
     initialiseResultPanels();
     setupHalationsControls();
@@ -107,7 +108,58 @@ function init() {
     loadEndpointCatalogue();
 }
 
-function setupNavigation() {
+function setupSidebarToggle() {
+    const toggleButton = document.getElementById('sidebar-toggle');
+    const sidebar = document.getElementById('studio-sidebar');
+    const closeButton = document.getElementById('sidebar-close');
+    const backdrop = document.getElementById('sidebar-backdrop');
+
+    if (!toggleButton || !sidebar) {
+        return () => {};
+    }
+
+    const setOpen = (open) => {
+        const shouldOpen = Boolean(open);
+        document.body.classList.toggle('sidebar-open', shouldOpen);
+        toggleButton.setAttribute('aria-expanded', String(shouldOpen));
+        if (backdrop) {
+            backdrop.hidden = !shouldOpen;
+        }
+    };
+
+    setOpen(false);
+
+    toggleButton.addEventListener('click', () => {
+        const isOpen = document.body.classList.contains('sidebar-open');
+        setOpen(!isOpen);
+    });
+
+    const close = () => setOpen(false);
+
+    if (closeButton) {
+        closeButton.addEventListener('click', close);
+    }
+
+    if (backdrop) {
+        backdrop.addEventListener('click', close);
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            close();
+        }
+    });
+
+    window.addEventListener('resize', () => {
+        if (window.innerWidth > 1100 && document.body.classList.contains('sidebar-open')) {
+            close();
+        }
+    });
+
+    return setOpen;
+}
+
+function setupNavigation(setSidebarOpen) {
     const navLinks = document.querySelectorAll('.nav-link');
     navLinks.forEach((link) => {
         link.addEventListener('click', () => {
@@ -117,6 +169,9 @@ function setupNavigation() {
                 target.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
             navLinks.forEach((btn) => btn.classList.toggle('active', btn === link));
+            if (typeof setSidebarOpen === 'function') {
+                setSidebarOpen(false);
+            }
         });
     });
 }
@@ -155,7 +210,7 @@ function initialiseResultPanels() {
         'parser-results': 'Run a parser request to inspect Docs operations.',
         'docx-results': 'Upload a DOCX file to extract text.',
         'image-results': 'Generate a glow or before/after clip to preview the output.',
-        'js-results': 'Split a panorama or proxy a Cobalt download to inspect generated assets.',
+        'js-results': 'Run the panorama splitter or Cobalt bridge to review generated assets.',
         'media-results': 'Inspect a media URL with yt-dlp to reveal metadata, downloads, and subtitles.',
         'ffmpeg-results': 'Upload a file and convert it with FFmpeg.'
     };

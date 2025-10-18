@@ -48,6 +48,32 @@ Tools API is a FastAPI application that bundles document conversion, media helpe
 
 > **Tip:** The Studio now reads the OpenAPI URL to determine the correct base path, so the buttons keep working even when Tools API sits behind a reverse proxy at `/tools` or similar.
 
+## Studio UI guide
+The redesigned Studio provides a responsive workspace that mirrors every REST endpoint and keeps recent responses at your fingertips.
+
+### Navigating the dashboard
+- **Global navigation:** The sidebar lists every toolkit. On narrow screens use the top-left menu button; the drawer closes automatically when you pick a section.
+- **Sticky top bar:** The top bar shows the current FastAPI version and exposes the Swagger docs for deeper schema inspection.
+- **Keyboard friendly:** Press <kbd>Esc</kbd> to dismiss the navigation drawer, and each section honours native tab order.
+
+### Overview panel
+- **Quick start** reminders show the three-step flow for any request.
+- **Power tips** summarise shortcuts (searching endpoints, understanding result history, and mobile gestures).
+- **Live endpoint catalogue** loads the OpenAPI document in real time—filter by name or tag to jump into an operation before you open Swagger.
+
+### Tool panels
+- **Parser:** Four forms cover HTML/Markdown parsing plus the synchronous Docs builders. Results render beside the forms so you can copy operations directly into the Google Docs API.
+- **DOCX Toolkit:** Upload `.docx` files and review plain text output in the adjacent result column. Metadata and extracted links stay intact.
+- **Image Studio:** Tune halation sliders live, toggle before/after overlays, and download generated assets without leaving the panel.
+- **JavaScript Tools:**
+  - *Panosplitter* handles panorama uploads and returns the generated slices.
+  - *Cobalt Downloader* now groups presets, advanced tuning, and the custom payload builder (with add/remove rows) in collapsible sections so power users can mix JSON overrides without losing the curated presets.
+- **Media Toolkit:**
+  - *FFmpeg Converter* exposes refreshable format selectors and streams conversion logs/results into their own panel.
+  - *yt-dlp Inspector* combines subtitle management, format selection, modal-based quality picking, and download progress tracking. Result history shows both metadata and stored assets.
+
+Each panel remembers the most recent response, making it easy to compare payloads after tweaking options. The result columns are scrollable on smaller screens so data never overflows.
+
 ## Service walkthrough
 Each section below includes an example call you can paste into a terminal. Replace placeholder values as needed.
 
