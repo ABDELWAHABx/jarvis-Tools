@@ -1,0 +1,62 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<div class="container-xxl studio-stack">
+    <section class="hero card gradient-card">
+        <div class="hero__content">
+            <h1 class="hero__title">Build automations visually</h1>
+            <p class="hero__subtitle">Explore every endpoint with form-driven previews, dynamic responses, and instant documentation.</p>
+            <div class="hero__actions">
+                <a class="btn btn-primary btn-lg" href="{{ request.url_for('studio_documents') }}">Document workflows</a>
+                <a class="btn btn-outline-light btn-lg" href="{{ request.url_for('studio_media') }}">Media workflows</a>
+            </div>
+        </div>
+        <div class="hero__meta">
+            <dl>
+                <div>
+                    <dt>Docs</dt>
+                    <dd><a href="{{ docs_url }}" target="_blank" rel="noreferrer">Open interactive schema</a></dd>
+                </div>
+                <div>
+                    <dt>Health</dt>
+                    <dd><code>/health</code></dd>
+                </div>
+                <div>
+                    <dt>OpenAPI</dt>
+                    <dd><code>{{ openapi_url }}</code></dd>
+                </div>
+            </dl>
+        </div>
+    </section>
+
+    <section class="card card--overview">
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <h2 class="section-title">Why use the Studio?</h2>
+                <p class="muted">Every panel mirrors a production endpoint. Use them to prototype jobs, test inputs, and share reproducible automations with your team.</p>
+                <ul class="list-check">
+                    <li>Side-by-side request builders and response viewers.</li>
+                    <li>Searchable endpoint catalogue powered by the live OpenAPI spec.</li>
+                    <li>All modules written as partials so you can extend or embed them elsewhere.</li>
+                </ul>
+            </div>
+            <div class="col-lg-6">
+                <div class="status-card">
+                    <h3 class="status-card__title">Cobalt downloader</h3>
+                    {% if cobalt_status.configured %}
+                    <p class="status-card__body">Remote base: <span class="badge text-bg-success">{{ cobalt_status.display_name }}</span></p>
+                    <ul class="status-list">
+                        <li>Remote available: <strong>{{ 'Yes' if cobalt_status.remote_available else 'No' }}</strong></li>
+                        <li>Local fallback: <strong>{{ 'Enabled' if cobalt_status.local_available else 'Disabled' }}</strong></li>
+                    </ul>
+                    {% else %}
+                    <p class="status-card__body">The bundled yt-dlp worker is standing by. Configure <code>COBALT_API_BASE_URL</code> for remote acceleration.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {% include "modules/overview.html" %}
+</div>
+{% endblock %}

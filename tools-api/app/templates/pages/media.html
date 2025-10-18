@@ -1,0 +1,22 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<div class="container-xxl studio-stack">
+    <section class="page-intro card">
+        <h1>Media workflows</h1>
+        <p class="muted">Split panoramas, apply cinematic glow, orchestrate Cobalt downloads, and trigger FFmpeg conversions in one place.</p>
+        <div class="intro-actions">
+            <a class="btn btn-primary" href="{{ docs_url }}#/js_tools" target="_blank" rel="noreferrer">JS tool endpoints</a>
+            <a class="btn btn-outline-light" href="{{ docs_url }}#/media" target="_blank" rel="noreferrer">Media endpoints</a>
+        </div>
+    </section>
+
+    {% include "modules/image.html" %}
+    {% include "modules/js_tools.html" %}
+    {% include "modules/media.html" %}
+</div>
+{% endblock %}
+
+{% block overlays %}
+    {% include "modules/media_overlays.html" %}
+{% endblock %}

@@ -1,0 +1,65 @@
+<section id="parser-tools" class="panel">
+    <header class="panel__header">
+        <h2>Parser</h2>
+        <p>Convert HTML or Markdown into structured Google Docs batchUpdate operations.</p>
+    </header>
+    <div class="panel__body">
+        <div class="panel__grid">
+            <div class="panel__column">
+                <div class="tool-grid">
+                    <div class="card">
+                        <form id="html-parse-form" class="tool-form">
+                            <div class="form-header">
+                                <h3>HTML → Requests</h3>
+                                <p class="muted">Paste marketing-ready HTML and receive the corresponding Google Docs operations.</p>
+                            </div>
+                            <label for="html-input">HTML</label>
+                            <textarea id="html-input" name="html" rows="8" placeholder="&lt;section&gt;...&lt;/section&gt;" required></textarea>
+                            <button type="submit" class="primary-btn">Parse HTML</button>
+                        </form>
+                    </div>
+                    <div class="card">
+                        <form id="markdown-parse-form" class="tool-form">
+                            <div class="form-header">
+                                <h3>Markdown → Requests</h3>
+                                <p class="muted">Bring GitHub-flavoured Markdown and convert it to Docs-ready mutations.</p>
+                            </div>
+                            <label for="markdown-input">Markdown</label>
+                            <textarea id="markdown-input" name="markdown" rows="8" placeholder="# Release notes" required></textarea>
+                            <button type="submit" class="primary-btn">Parse Markdown</button>
+                        </form>
+                    </div>
+                    <div class="card">
+                        <form id="docs-html-form" class="tool-form">
+                            <div class="form-header">
+                                <h3>Instant Docs Request Builder</h3>
+                                <p class="muted">Generate Google Docs batchUpdate payloads from HTML without queueing a job.</p>
+                            </div>
+                            <label for="docs-html-input">HTML</label>
+                            <textarea id="docs-html-input" name="html" rows="6" placeholder="&lt;h1&gt;Launch Deck&lt;/h1&gt;" required></textarea>
+                            <button type="submit" class="primary-btn">Build Docs Requests</button>
+                        </form>
+                    </div>
+                    <div class="card">
+                        <form id="docs-markdown-form" class="tool-form">
+                            <div class="form-header">
+                                <h3>Markdown Docs Builder</h3>
+                                <p class="muted">Skip the queue and transform Markdown to Docs mutations immediately.</p>
+                            </div>
+                            <label for="docs-markdown-input">Markdown</label>
+                            <textarea id="docs-markdown-input" name="markdown" rows="6" placeholder="## Agenda" required></textarea>
+                            <button type="submit" class="primary-btn">Build Docs Requests</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <aside class="panel__column panel__column--results">
+                <div class="results-header">
+                    <h3>Latest output</h3>
+                    <p class="muted">Responses render below for easy copy and paste.</p>
+                </div>
+                <div id="parser-results" class="result-panel" aria-live="polite"></div>
+            </aside>
+        </div>
+    </div>
+</section>

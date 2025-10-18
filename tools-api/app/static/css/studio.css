@@ -35,6 +35,158 @@ body {
     min-height: 100vh;
 }
 
+.studio-navbar {
+    background: linear-gradient(180deg, rgba(10, 15, 29, 0.92) 0%, rgba(6, 10, 20, 0.94) 100%) !important;
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.studio-main {
+    min-height: calc(100vh - var(--topbar-height));
+}
+
+.studio-stack {
+    display: grid;
+    gap: 36px;
+    max-width: var(--content-max);
+    margin: 0 auto;
+}
+
+.gradient-card {
+    background: linear-gradient(135deg, rgba(31, 64, 125, 0.85), rgba(20, 32, 65, 0.92));
+    border: 1px solid rgba(79, 139, 255, 0.3);
+}
+
+.hero {
+    display: grid;
+    gap: 32px;
+    padding: clamp(24px, 4vw, 48px);
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    align-items: center;
+}
+
+.hero__content {
+    display: grid;
+    gap: 16px;
+}
+
+.hero__title {
+    font-size: clamp(2.2rem, 4vw, 2.8rem);
+    margin: 0;
+}
+
+.hero__subtitle {
+    margin: 0;
+    font-size: 1rem;
+    color: rgba(248, 251, 255, 0.85);
+}
+
+.hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.hero__meta {
+    padding: 24px;
+    border-radius: var(--radius-md);
+    background: rgba(9, 14, 28, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    display: grid;
+    gap: 12px;
+    align-content: start;
+}
+
+.hero__meta dl {
+    margin: 0;
+    display: grid;
+    gap: 12px;
+}
+
+.hero__meta dt {
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.hero__meta dd {
+    margin: 4px 0 0;
+}
+
+.card--overview {
+    padding: clamp(24px, 3vw, 40px);
+    background: linear-gradient(180deg, rgba(14, 22, 42, 0.92) 0%, rgba(10, 18, 34, 0.96) 100%);
+}
+
+.section-title {
+    font-size: clamp(1.6rem, 3vw, 2rem);
+    margin-bottom: 16px;
+}
+
+.list-check {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+}
+
+.list-check li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.list-check li::before {
+    content: "✔";
+    margin-right: 0;
+    color: var(--success);
+}
+
+.status-card {
+    border-radius: var(--radius-md);
+    padding: 24px;
+    background: rgba(12, 22, 40, 0.85);
+    border: 1px solid rgba(79, 139, 255, 0.25);
+    display: grid;
+    gap: 16px;
+}
+
+.status-card__title {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+.status-card__body {
+    margin: 0;
+}
+
+.status-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: var(--muted);
+}
+
+.page-intro {
+    padding: clamp(24px, 3vw, 40px);
+    background: linear-gradient(180deg, rgba(12, 20, 38, 0.92) 0%, rgba(8, 14, 28, 0.95) 100%);
+    border: 1px solid rgba(79, 139, 255, 0.2);
+    display: grid;
+    gap: 12px;
+}
+
+.page-intro h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 3vw, 2.4rem);
+}
+
+.intro-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
 body.sidebar-open {
     overflow: hidden;
 }

@@ -219,9 +219,9 @@ async def health():
 
 
 # Root HTML studio
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def studio(request: Request):
-    """Serve the interactive Tools API Studio dashboard."""
+def _render_studio_template(request: Request, template_name: str) -> HTMLResponse:
+    """Render a studio template or display a helpful message when Jinja is missing."""
+
     if templates is None:
         body = """
         <!DOCTYPE html>
@@ -245,6 +245,13 @@ async def studio(request: Request):
         </html>
         """
         return HTMLResponse(content=body, status_code=200)
+
+    context = _build_studio_context(request)
+    return templates.TemplateResponse(template_name, context)
+
+
+def _build_studio_context(request: Request) -> dict:
+    """Compose template context shared across Studio pages."""
 
     cobalt_base = settings.COBALT_API_BASE_URL
     cobalt_display = cobalt_base
@@ -284,24 +291,39 @@ async def studio(request: Request):
     docs_url = _resolve_app_url(request, app.docs_url, "/docs")
     openapi_url = _resolve_app_url(request, app.openapi_url, "/openapi.json")
 
-    return templates.TemplateResponse(
-        "studio.html",
-        {
-            "request": request,
-            "docs_url": docs_url,
-            "openapi_url": openapi_url,
-            "version": app.version or "",
-            "cobalt_status": {
-                "configured": configured,
-                "using_fallback": local_available and not remote_available,
-                "base_url": cobalt_base,
-                "display_name": cobalt_display,
-                "remote_available": remote_available,
-                "local_available": local_available,
-            },
-            "cobalt_shortcuts": cobalt_shortcuts,
+    return {
+        "request": request,
+        "docs_url": docs_url,
+        "openapi_url": openapi_url,
+        "version": app.version or "",
+        "cobalt_status": {
+            "configured": configured,
+            "using_fallback": local_available and not remote_available,
+            "base_url": cobalt_base,
+            "display_name": cobalt_display,
+            "remote_available": remote_available,
+            "local_available": local_available,
         },
-    )
+        "cobalt_shortcuts": cobalt_shortcuts,
+    }
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False, name="studio_home")
+async def studio_home(request: Request):
+    """Serve the Studio landing page."""
+    return _render_studio_template(request, "pages/home.html")
+
+
+@app.get("/documents", response_class=HTMLResponse, include_in_schema=False, name="studio_documents")
+async def studio_documents(request: Request):
+    """Serve the document tooling workspace."""
+    return _render_studio_template(request, "pages/documents.html")
+
+
+@app.get("/media", response_class=HTMLResponse, include_in_schema=False, name="studio_media")
+async def studio_media(request: Request):
+    """Serve the media tooling workspace."""
+    return _render_studio_template(request, "pages/media.html")
 
 
 @app.get("/api", tags=["system"])
