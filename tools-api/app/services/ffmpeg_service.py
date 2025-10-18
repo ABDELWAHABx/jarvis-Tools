@@ -25,7 +25,6 @@ class FfmpegServiceError(RuntimeError):
 @dataclass(frozen=True)
 class ConversionResult:
     """Represents a successful FFmpeg conversion."""
-
     output_path: Path
     filename: str
     media_type: str
@@ -41,17 +40,16 @@ class FfmpegService:
 
     def list_formats(self) -> dict[str, list[str]]:
         """Return supported FFmpeg demuxer/muxer formats with caching."""
-
         with self._cache_lock:
             if self._cached_formats is not None:
                 cached_at, payload = self._cached_formats
                 if time.monotonic() - cached_at < _CACHE_TTL_SECONDS:
-                    return {key: value.copy() for key, value in payload.items()}
+                    return {k: v.copy() for k, v in payload.items()}
 
         formats = self._probe_formats()
         with self._cache_lock:
             self._cached_formats = (time.monotonic(), formats)
-        return {key: value.copy() for key, value in formats.items()}
+        return {k: v.copy() for k, v in formats.items()}
 
     def _probe_formats(self) -> dict[str, list[str]]:
         try:
@@ -61,11 +59,11 @@ class FfmpegService:
                 capture_output=True,
                 text=True,
             )
-        except FileNotFoundError as exc:  # pragma: no cover - depends on environment
+        except FileNotFoundError as exc:  # pragma: no cover
             raise FfmpegServiceError(
                 "FFmpeg is not installed or not available on the PATH."
             ) from exc
-        except subprocess.CalledProcessError as exc:  # pragma: no cover - hard to trigger
+        except subprocess.CalledProcessError as exc:  # pragma: no cover
             stderr = (exc.stderr or exc.stdout or "").strip()
             message = stderr or "Unable to query FFmpeg formats."
             raise FfmpegServiceError(message) from exc
@@ -77,7 +75,6 @@ class FfmpegService:
             match = FORMAT_LINE_PATTERN.match(raw_line)
             if not match:
                 continue
-
             demux_flag, mux_flag, names = match.groups()
             for candidate in self._split_format_names(names):
                 if demux_flag == "D":
@@ -104,19 +101,23 @@ class FfmpegService:
         *,
         source_format: str | None,
         target_format: str,
+        sample_rate: int = 24000,
+        channels: int = 1,
     ) -> ConversionResult:
-        if not target_format:
+        # Validate target format param
+        if not target_format or not target_format.strip():
             raise FfmpegServiceError("target_format is required")
 
         available = self.list_formats()
+
         normalised_target = self._normalise_format(target_format)
         if normalised_target not in {fmt.lower() for fmt in available["outputs"]}:
             raise FfmpegServiceError(
                 f"FFmpeg does not support exporting to '{target_format}'."
             )
 
-        normalised_source = None
-        if source_format:
+        normalised_source: str | None = None
+        if source_format and source_format.strip():
             normalised_source = self._normalise_format(source_format)
             if normalised_source not in {fmt.lower() for fmt in available["inputs"]}:
                 raise FfmpegServiceError(
@@ -125,44 +126,77 @@ class FfmpegService:
 
         workdir = Path(tempfile.mkdtemp(prefix="ffmpeg-convert-"))
         input_path = self._write_upload(upload, workdir, normalised_source)
+
+        # Defensive: ensure input file exists and has content
+        if not input_path.exists():
+            raise FfmpegServiceError("Uploaded file could not be written to disk.")
+        try:
+            size = input_path.stat().st_size
+        except OSError:
+            size = 0
+        if size <= 0:
+            raise FfmpegServiceError("Uploaded file appears to be empty.")
+
         output_filename = self._build_output_filename(upload.filename, normalised_target)
         output_path = workdir / output_filename
 
         command = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel",
-            "error",
+            "-loglevel", "error",
             "-y",
         ]
         if normalised_source:
-            command.extend(["-f", normalised_source])
+            if normalised_source == "s16le":   # For raw PCM from Google TTS
+                command.extend([
+                  "-f", "s16le",
+                 "-ar", str(sample_rate),
+                  "-ac", str(channels),
+               ])
+            else:
+            # Provide container hint if specified
+                command.extend(["-f", normalised_source])
         command.extend(["-i", str(input_path), str(output_path)])
 
         try:
-            subprocess.run(command, check=True)
-        except FileNotFoundError as exc:  # pragma: no cover - depends on environment
+            # Capture stderr/stdout for clear error diagnostics
+            completed = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as exc:  # pragma: no cover
             raise FfmpegServiceError(
                 "FFmpeg is not installed or not available on the PATH."
             ) from exc
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or exc.stdout or "").strip()
+            # Provide the actual FFmpeg error message for debugging
             message = stderr or "FFmpeg failed to convert the media file."
             raise FfmpegServiceError(message) from exc
 
         if not output_path.exists():  # pragma: no cover - defensive
-            raise FfmpegServiceError("FFmpeg reported success but no output file was created.")
+            raise FfmpegServiceError(
+                "FFmpeg reported success but no output file was created."
+            )
 
         mime_type, _ = mimetypes.guess_type(output_filename)
         media_type = mime_type or "application/octet-stream"
-        return ConversionResult(output_path=output_path, filename=output_filename, media_type=media_type, workdir=workdir)
+        return ConversionResult(
+            output_path=output_path,
+            filename=output_filename,
+            media_type=media_type,
+            workdir=workdir,
+        )
 
     def cleanup_directory(self, directory: Path | str | None) -> None:
         if not directory:
             return
         try:
             shutil.rmtree(directory, ignore_errors=True)
-        except OSError:  # pragma: no cover - ignore cleanup errors
+        except OSError:
+            # Intentionally ignore cleanup errors
             pass
 
     @staticmethod
@@ -178,23 +212,32 @@ class FfmpegService:
 
     @staticmethod
     def _write_upload(upload: UploadFile, workdir: Path, source_format: str | None) -> Path:
+        # Derive destination stem/suffix from filename or source_format hint
         stem = "source"
         suffix = ""
         if upload.filename:
             original = Path(upload.filename)
             if original.suffix:
-                suffix = original.suffix
+                suffix = original.suffix  # keep original suffix if present
             else:
                 stem = original.stem or stem
         if not suffix and source_format:
             suffix = f".{source_format}"
         if not suffix:
+            # Final fallback when no hints are present
             suffix = ".bin"
 
         destination = workdir / f"{stem}{suffix}"
-        upload.file.seek(0)
+        # Ensure file stream at beginning
+        try:
+            upload.file.seek(0)
+        except Exception:
+            # If seek fails, proceed to copy anyway
+            pass
+
         with destination.open("wb") as buffer:
             shutil.copyfileobj(upload.file, buffer)
+
         return destination
 
     @staticmethod

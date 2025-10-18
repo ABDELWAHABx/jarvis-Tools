@@ -35,16 +35,21 @@ async def convert_media(
     file: UploadFile = File(..., description="Media file to convert."),
     target_format: str = Form(..., description="Desired output container/format."),
     source_format: str | None = Form(None, description="Optional hint for the input container."),
+    sample_rate: int = Form(24000, description="Input sample rate (Hz), for raw PCM/S16LE etc."),   # NEW
+    channels: int = Form(1, description="Number of input channels, for PCM.")                       # NEW
 ) -> FileResponse:
     """Convert media using FFmpeg and stream back the resulting file."""
 
     await file.seek(0)
     try:
+        # Pass new params to the service call
         result: ConversionResult = await run_in_threadpool(
             ffmpeg_service.convert_upload,
             file,
             source_format=source_format,
             target_format=target_format,
+            sample_rate=sample_rate,   # NEW
+            channels=channels          # NEW
         )
     except FfmpegServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -443,6 +443,14 @@ function setupFfmpegForm() {
             status.textContent = 'Loading FFmpeg formats…';
         }
         try {
+            // Diagnostic: log the resolved URL so users can inspect network failures in the browser console.
+            try {
+                const probeUrl = resolveApiUrl('/media/ffmpeg/formats');
+                console.debug('Requesting FFmpeg formats from:', probeUrl);
+            } catch (err) {
+                console.debug('Unable to compute FFmpeg formats URL', err);
+            }
+
             const data = await fetchFfmpegFormats();
             ffmpegState.formats = data;
             populateSelectOptions(fromSelect, data.inputs, {
@@ -466,7 +474,15 @@ function setupFfmpegForm() {
         } catch (error) {
             console.error(error);
             if (status) {
-                status.textContent = error.message || 'Failed to load FFmpeg formats.';
+                // Provide a more helpful message for common scenarios (missing FFmpeg or timeout)
+                const msg = error && error.message ? String(error.message) : 'Failed to load FFmpeg formats.';
+                if (msg.toLowerCase().includes('ffmpeg is not installed')) {
+                    status.textContent = 'FFmpeg is not installed on the server. Install FFmpeg and restart the service.';
+                } else if (msg.toLowerCase().includes('timed out')) {
+                    status.textContent = 'Timed out while loading FFmpeg formats. Check server availability or increase timeout.';
+                } else {
+                    status.textContent = msg;
+                }
             }
             if (!hadFormats) {
                 populateSelectOptions(toSelect, [], {
@@ -2729,11 +2745,21 @@ async function parseBinaryResponse(response) {
 }
 
 async function fetchFfmpegFormats() {
+    // Protect against hung requests by using an AbortController with a timeout.
+    const TIMEOUT_MS = 8000; // 8s
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
     let response;
     try {
-        response = await fetch(resolveApiUrl('/media/ffmpeg/formats'));
+        response = await fetch(resolveApiUrl('/media/ffmpeg/formats'), { signal: controller.signal });
     } catch (error) {
+        if (error && error.name === 'AbortError') {
+            throw new Error('Request for FFmpeg formats timed out. Check the server and network connection.');
+        }
         throw new Error('Unable to reach the FFmpeg formats endpoint.');
+    } finally {
+        clearTimeout(timer);
     }
 
     const contentType = response.headers.get('content-type') || '';
