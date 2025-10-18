@@ -7,7 +7,12 @@ import os
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Callable, Optional
+from types import ModuleType
+from typing import TYPE_CHECKING, Callable, Optional
+
+if TYPE_CHECKING:  # pragma: no cover - type checking only
+    import pystray
+    from PIL import Image as PILImage
 
 
 def _is_desktop_session() -> bool:
@@ -44,9 +49,9 @@ def _load_tray_backend() -> Optional["_TrayBackend"]:
 
 @dataclass
 class _TrayBackend:
-    pystray: "module"
-    image_module: "module"
-    image_draw_module: "module"
+    pystray: ModuleType
+    image_module: ModuleType
+    image_draw_module: ModuleType
 
 
 class SystemTrayController:
@@ -131,7 +136,7 @@ class SystemTrayController:
         return self._backend is not None
 
     # Internal helpers ---------------------------------------------------
-    def _create_icon_image(self, state: str) -> "PIL.Image.Image":
+    def _create_icon_image(self, state: str) -> "PILImage.Image":
         backend = self._backend
         assert backend is not None  # pragma: no cover - guarded by start()
         image = backend.image_module.new("RGB", (64, 64), color=_state_color(state))

@@ -197,7 +197,7 @@ async def startup_event():
     _register_windows_connection_reset_handler()
     logger.info("🚀 Tools API starting up...")
     logger.info(f"Environment: {settings.ENVIRONMENT if hasattr(settings, 'ENVIRONMENT') else 'production'}")
-    logger.info(f"CORS enabled for all origins")
+    logger.info("CORS enabled for all origins")
 
 
 @app.on_event("shutdown")
