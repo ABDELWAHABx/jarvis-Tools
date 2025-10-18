@@ -1,0 +1,42 @@
+<section id="overview" class="panel">
+    <header class="panel__header">
+        <h2>Welcome to your automation studio</h2>
+        <p>Trigger conversions, inspect jobs, and download assets without writing cURL commands.</p>
+    </header>
+    <div class="panel__body">
+        <div class="panel__grid panel__grid--overview">
+            <div class="panel__column">
+                <div class="card card--hero">
+                    <h3>Quick start</h3>
+                    <ol class="step-list">
+                        <li>Choose a toolkit from the navigation.</li>
+                        <li>Provide content, upload files, or paste a URL.</li>
+                        <li>Run the request and review rich results instantly.</li>
+                    </ol>
+                    <p class="muted">Need deeper integration? Wire these endpoints straight into n8n, Zapier, or your agent stack.</p>
+                </div>
+                <div class="card card--callout">
+                    <h3>Power tips</h3>
+                    <ul class="bullet-list">
+                        <li>Use the search below to filter the live OpenAPI catalogue.</li>
+                        <li>Each result panel stores your latest response—perfect for diffing payloads.</li>
+                        <li>Switch devices freely: the interface collapses neatly on tablets and phones.</li>
+                    </ul>
+                </div>
+            </div>
+            <aside class="panel__column panel__column--catalog">
+                <div class="catalog">
+                    <div class="catalog__header">
+                        <h3>Live endpoint catalogue</h3>
+                        <p class="muted">Search every route exposed by this deployment.</p>
+                        <label class="visually-hidden" for="endpoint-filter">Filter endpoints</label>
+                        <input id="endpoint-filter" type="search" placeholder="Filter by name or tag" />
+                    </div>
+                    <div id="endpoint-list" class="endpoint-list" aria-live="polite">
+                        <div class="muted">Loading endpoint catalogue…</div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+</section>

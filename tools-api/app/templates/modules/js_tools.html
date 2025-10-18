@@ -1,0 +1,271 @@
+<section id="js-tools" class="panel">
+    <header class="panel__header">
+        <h2>JavaScript Tools</h2>
+        <p>Bridge Node-powered utilities like the panorama splitter straight from the browser.</p>
+    </header>
+    <div class="panel__body">
+        <div class="panel__grid">
+            <div class="panel__column">
+                <div class="tool-grid">
+                    <div class="card">
+                        <form id="panosplitter-form" class="tool-form">
+                            <div class="form-header">
+                                <h3>Panosplitter</h3>
+                                <p class="muted">Upload a panorama and get Instagram-ready slices plus a downloadable zip.</p>
+                            </div>
+                            <label for="panosplitter-image">Panorama image</label>
+                            <input id="panosplitter-image" type="file" accept="image/*" required />
+                            <label class="checkbox">
+                                <input id="panosplitter-highres" type="checkbox" />
+                                <span>Enable high resolution mode</span>
+                            </label>
+                            <button type="submit" class="primary-btn">Split Panorama</button>
+                        </form>
+                    </div>
+                    <div class="card cobalt-card">
+                        <form id="cobalt-form" class="tool-form cobalt-form">
+                            <div class="form-header">
+                                <h3>Cobalt Downloader</h3>
+                                <p class="muted">Paste a link, pick a preset, and the Tools API will handle the rest. If your remote instance is offline we fall back to the bundled yt-dlp worker automatically.</p>
+                            </div>
+                            <div id="cobalt-status-banner" class="status-banner" hidden>
+                                <span class="status-banner__label">Cobalt</span>
+                                <span class="status-banner__message"></span>
+                            </div>
+                            <fieldset class="fieldset">
+                                <legend>1. Paste a link</legend>
+                                <label for="cobalt-url">URL</label>
+                                <input id="cobalt-url" type="url" required placeholder="https://www.youtube.com/watch?v=..." />
+                                <div class="cobalt-mode-toggle" role="radiogroup" aria-label="Download type">
+                                    <label class="chip">
+                                        <input type="radio" name="cobalt-mode" id="cobalt-mode-video" value="video" checked />
+                                        <span>Video</span>
+                                    </label>
+                                    <label class="chip">
+                                        <input type="radio" name="cobalt-mode" id="cobalt-mode-audio" value="audio" />
+                                        <span>Audio</span>
+                                    </label>
+                                    <label class="chip">
+                                        <input type="radio" name="cobalt-mode" id="cobalt-mode-metadata" value="metadata" />
+                                        <span>Metadata</span>
+                                    </label>
+                                </div>
+                                <p id="cobalt-mode-description" class="helper-text">Video downloads include audio by default. Switch to audio for podcast-ready files or metadata for quick manifest checks.</p>
+                            </fieldset>
+                            {% if cobalt_shortcuts %}
+                            <aside id="cobalt-quick-actions" class="quick-actions">
+                                <p class="helper-text">Prefer presets? Choose a shortcut after pasting a link.</p>
+                                <div class="quick-actions__list">
+                                    {% for shortcut in cobalt_shortcuts %}
+                                    <button
+                                        type="button"
+                                        class="quick-action-btn"
+                                        data-shortcut="{{ shortcut.slug }}"
+                                        data-response-format="{{ shortcut.response_format }}"
+                                    >
+                                        <span class="quick-action-btn__label">{{ shortcut.label }}</span>
+                                        <span class="quick-action-btn__description">{{ shortcut.description }}</span>
+                                    </button>
+                                    {% endfor %}
+                                </div>
+                            </aside>
+                            {% endif %}
+                            <fieldset class="fieldset">
+                                <legend>2. Choose a preset</legend>
+                                <div class="form-row">
+                                    <div>
+                                        <label for="cobalt-service">Service override</label>
+                                        <select id="cobalt-service">
+                                            <option value="">Auto detect</option>
+                                            <option value="youtube">YouTube</option>
+                                            <option value="tiktok">TikTok</option>
+                                            <option value="instagram">Instagram</option>
+                                            <option value="twitter">Twitter / X</option>
+                                            <option value="soundcloud">SoundCloud</option>
+                                            <option value="facebook">Facebook</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-preset">Quick preset</label>
+                                        <select id="cobalt-preset">
+                                            <option value="custom" data-reset="false" data-options="{}" data-description="Start with a blank payload and build your own combination of options.">Custom (manual)</option>
+                                            <option value="audio-mp3" data-options='{"downloadMode":"audio","audioFormat":"mp3","audioBitrate":"320","response_format":"binary"}' data-description="Audio-only MP3 download at 320 kbps. Binary responses are enabled so you can save directly.">High bitrate MP3</option>
+                                            <option value="audio-ogg" data-options='{"downloadMode":"audio","audioFormat":"ogg","audioBitrate":"96","response_format":"binary"}' data-description="Lightweight OGG/Vorbis audio tuned for spoken-word content and lower bandwidth." data-reset="true">Compact podcast OGG</option>
+                                            <option value="video-1080" data-options='{"videoQuality":"1080","youtubeVideoCodec":"h264","youtubeVideoContainer":"mp4","response_format":"binary"}' data-description="1080p MP4 download using the H.264 codec for broad compatibility." data-reset="true">1080p MP4 (H.264)</option>
+                                            <option value="video-4k" data-options='{"videoQuality":"2160","youtubeVideoCodec":"av1","youtubeVideoContainer":"webm","response_format":"binary","alwaysProxy":true}' data-description="Force 4K WebM output via AV1 with proxying enabled for the largest files." data-reset="true">4K WebM (AV1)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <p id="cobalt-preset-description" class="muted" hidden></p>
+                            </fieldset>
+                            <fieldset class="fieldset">
+                                <legend>3. Output preferences</legend>
+                                <div class="form-row">
+                                    <label class="checkbox">
+                                        <input id="cobalt-binary" type="checkbox" />
+                                        <span>Return binary download</span>
+                                    </label>
+                                    <label class="checkbox">
+                                        <input id="cobalt-always-proxy" type="checkbox" />
+                                        <span>Always proxy downloads</span>
+                                    </label>
+                                    <label class="checkbox">
+                                        <input id="cobalt-disable-metadata" type="checkbox" />
+                                        <span>Strip metadata from files</span>
+                                    </label>
+                                </div>
+                                <label for="cobalt-filename">Filename override (binary only)</label>
+                                <input id="cobalt-filename" type="text" placeholder="custom.mp4" />
+                            </fieldset>
+                            <details class="advanced-options" id="cobalt-advanced">
+                                <summary>Advanced tuning</summary>
+                                <div class="advanced-grid">
+                                    <div>
+                                        <label for="cobalt-download-mode">Download mode</label>
+                                        <select id="cobalt-download-mode">
+                                            <option value="">Use instance default</option>
+                                            <option value="auto">Auto (audio + video)</option>
+                                            <option value="audio">Audio only</option>
+                                            <option value="mute">Mute video</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-filename-style">Filename style</label>
+                                        <select id="cobalt-filename-style">
+                                            <option value="">Use instance default</option>
+                                            <option value="classic">Classic</option>
+                                            <option value="pretty">Pretty</option>
+                                            <option value="basic">Basic</option>
+                                            <option value="nerdy">Nerdy</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-audio-format">Audio format</label>
+                                        <select id="cobalt-audio-format">
+                                            <option value="">Use instance default</option>
+                                            <option value="best">Best available</option>
+                                            <option value="mp3">MP3</option>
+                                            <option value="ogg">OGG / Vorbis</option>
+                                            <option value="wav">WAV</option>
+                                            <option value="opus">Opus</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-audio-bitrate">Audio bitrate (kbps)</label>
+                                        <select id="cobalt-audio-bitrate">
+                                            <option value="">Use instance default</option>
+                                            <option value="64">64</option>
+                                            <option value="96">96</option>
+                                            <option value="128">128</option>
+                                            <option value="192">192</option>
+                                            <option value="256">256</option>
+                                            <option value="320">320</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-video-quality">Video quality</label>
+                                        <select id="cobalt-video-quality">
+                                            <option value="">Use instance default</option>
+                                            <option value="480">480p</option>
+                                            <option value="720">720p</option>
+                                            <option value="1080">1080p</option>
+                                            <option value="1440">1440p</option>
+                                            <option value="2160">2160p</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-youtube-video-codec">YouTube video codec</label>
+                                        <select id="cobalt-youtube-video-codec">
+                                            <option value="">Instance default</option>
+                                            <option value="h264">H.264</option>
+                                            <option value="vp9">VP9</option>
+                                            <option value="av1">AV1</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-youtube-video-container">YouTube container</label>
+                                        <select id="cobalt-youtube-video-container">
+                                            <option value="">Instance default</option>
+                                            <option value="mp4">MP4</option>
+                                            <option value="webm">WebM</option>
+                                            <option value="mkv">MKV</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-local-processing">Local processing</label>
+                                        <select id="cobalt-local-processing">
+                                            <option value="">Instance default</option>
+                                            <option value="always">Always</option>
+                                            <option value="never">Never</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-subtitle-lang">Subtitle language</label>
+                                        <input id="cobalt-subtitle-lang" type="text" placeholder="en" />
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-youtube-dub-lang">YouTube dub language</label>
+                                        <input id="cobalt-youtube-dub-lang" type="text" placeholder="en" />
+                                    </div>
+                                    <div>
+                                        <label for="cobalt-convert-gif">Convert GIF</label>
+                                        <select id="cobalt-convert-gif">
+                                            <option value="">Instance default</option>
+                                            <option value="mp4">MP4</option>
+                                            <option value="webm">WebM</option>
+                                            <option value="gif">GIF</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <label class="checkbox">
+                                        <input id="cobalt-allow-h265" type="checkbox" />
+                                        <span>Allow H265</span>
+                                    </label>
+                                    <label class="checkbox">
+                                        <input id="cobalt-tiktok-full-audio" type="checkbox" />
+                                        <span>TikTok full audio</span>
+                                    </label>
+                                    <label class="checkbox">
+                                        <input id="cobalt-youtube-better-audio" type="checkbox" />
+                                        <span>Prefer better audio</span>
+                                    </label>
+                                    <label class="checkbox">
+                                        <input id="cobalt-youtube-hls" type="checkbox" />
+                                        <span>Use HLS</span>
+                                    </label>
+                                </div>
+                                <template id="cobalt-option-template">
+                                    <div class="form-row cobalt-option-row">
+                                        <input type="text" data-option-key aria-label="Option key" placeholder="option name" />
+                                        <select data-option-type aria-label="Value type">
+                                            <option value="string">Text</option>
+                                            <option value="number">Number</option>
+                                            <option value="boolean">Boolean</option>
+                                            <option value="json">JSON</option>
+                                        </select>
+                                        <input type="text" data-option-value aria-label="Option value" placeholder="value" />
+                                        <button type="button" class="text-btn" data-option-remove aria-label="Remove option">Remove</button>
+                                    </div>
+                                </template>
+                                <button type="button" class="text-btn" id="cobalt-add-option">Add custom option</button>
+                                <label for="cobalt-payload">Advanced JSON payload</label>
+                                <textarea id="cobalt-payload" rows="5" placeholder='{"youtubeHLS": true, "subtitleLang": "en"}'></textarea>
+                            </details>
+                            <div class="form-actions">
+                                <button type="submit" class="primary-btn">Download with Cobalt</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <aside class="panel__column panel__column--results">
+                <div class="results-header">
+                    <h3>Latest output</h3>
+                    <p class="muted">Track generated zips, metadata, and preset payloads.</p>
+                </div>
+                <div id="js-results" class="result-panel" aria-live="polite"></div>
+            </aside>
+        </div>
+    </div>
+</section>

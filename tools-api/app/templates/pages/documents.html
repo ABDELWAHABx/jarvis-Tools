@@ -1,0 +1,17 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<div class="container-xxl studio-stack">
+    <section class="page-intro card">
+        <h1>Document workflows</h1>
+        <p class="muted">Convert HTML or Markdown, enqueue Docs jobs, and inspect text extraction without leaving the browser.</p>
+        <div class="intro-actions">
+            <a class="btn btn-primary" href="{{ docs_url }}#/%23/tag/parser" target="_blank" rel="noreferrer">Parser endpoints</a>
+            <a class="btn btn-outline-light" href="{{ docs_url }}#/docx" target="_blank" rel="noreferrer">DOCX endpoints</a>
+        </div>
+    </section>
+
+    {% include "modules/parser.html" %}
+    {% include "modules/docx.html" %}
+</div>
+{% endblock %}

@@ -48,6 +48,30 @@ Tools API is a FastAPI application that bundles document conversion, media helpe
 
 > **Tip:** The Studio now reads the OpenAPI URL to determine the correct base path, so the buttons keep working even when Tools API sits behind a reverse proxy at `/tools` or similar.
 
+## Studio UI guide
+The Studio has been rebuilt as a multi-page experience powered by Bootstrap 5. Each page assembles Jinja partials from `app/templates/modules`, so you can reuse or swap individual tool panels without touching the navigation chrome.
+
+### Navigation
+- **Top navbar:** A sticky Bootstrap navbar provides quick links to the Overview, Document, and Media workspaces. The API docs button and FastAPI version badge remain visible at every breakpoint.
+- **Responsive layout:** Cards and panels wrap automatically on small screens, while forms and result panes stay side-by-side on desktops.
+- **Modular templates:** Every toolkit lives in its own partial (for example `parser.html`, `docx.html`, `media.html`). Include the partials you need when composing new pages.
+
+### Overview page
+- **Hero summary:** Highlights the docs URLs, OpenAPI path, and Cobalt gateway status at a glance.
+- **Power checklist:** Lists the biggest wins for using the Studio with visual checkmarks.
+- **Live endpoint catalogue:** Still backed by the OpenAPI spec—filter by name or tag before diving into Swagger.
+
+### Document workflows page
+- **Parser module:** HTML and Markdown forms (plus synchronous Docs builders) render in a two-column layout with response history on the right.
+- **DOCX module:** Drag in a `.docx` file and review cleaned text plus metadata in the adjacent result pane.
+
+### Media workflows page
+- **Image tools:** Apply halation glows or build before/after promos with slider controls.
+- **JavaScript tools:** Panosplit panoramas or orchestrate the Cobalt downloader with presets, advanced overrides, and shortcut buttons.
+- **Media toolkit:** Manage FFmpeg conversions and yt-dlp downloads, complete with modal-based quality selection and streaming progress indicators.
+
+Each module remembers the most recent response, making it easy to compare payloads after tweaking options. Result columns scroll independently so data never overflows.
+
 ## Service walkthrough
 Each section below includes an example call you can paste into a terminal. Replace placeholder values as needed.
 

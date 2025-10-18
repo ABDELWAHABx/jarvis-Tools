@@ -1,0 +1,30 @@
+<section id="docx-tools" class="panel">
+    <header class="panel__header">
+        <h2>DOCX Toolkit</h2>
+        <p>Upload Word documents and extract plain text instantly.</p>
+    </header>
+    <div class="panel__body">
+        <div class="panel__grid">
+            <div class="panel__column">
+                <div class="card">
+                    <form id="docx-parse-form" class="tool-form">
+                        <div class="form-header">
+                            <h3>Parse DOCX</h3>
+                            <p class="muted">Drop a .docx file to stream back the cleaned text.</p>
+                        </div>
+                        <label for="docx-file">DOCX file</label>
+                        <input id="docx-file" type="file" accept=".docx" required />
+                        <button type="submit" class="primary-btn">Extract Text</button>
+                    </form>
+                </div>
+            </div>
+            <aside class="panel__column panel__column--results">
+                <div class="results-header">
+                    <h3>Latest output</h3>
+                    <p class="muted">Plain text responses appear with metadata intact.</p>
+                </div>
+                <div id="docx-results" class="result-panel" aria-live="polite"></div>
+            </aside>
+        </div>
+    </div>
+</section>

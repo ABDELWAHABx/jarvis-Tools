@@ -1,0 +1,74 @@
+<section id="image-tools" class="panel">
+    <header class="panel__header">
+        <h2>Image Studio</h2>
+        <p>Apply glow effects or create before/after promos without leaving the browser.</p>
+    </header>
+    <div class="panel__body">
+        <div class="panel__grid">
+            <div class="panel__column">
+                <div class="tool-grid">
+                    <div class="card">
+                        <form id="halations-form" class="tool-form">
+                            <div class="form-header">
+                                <h3>Halations Glow</h3>
+                                <p class="muted">Upload an image and tune the glow with live sliders.</p>
+                            </div>
+                            <label for="halations-image">Image</label>
+                            <input id="halations-image" type="file" accept="image/*" required />
+                            <div class="slider-group">
+                                <label>Blur amount <span id="blur-value">10</span></label>
+                                <input id="blur-slider" type="range" min="0" max="50" step="1" value="10" />
+                            </div>
+                            <div class="slider-group">
+                                <label>Brightness threshold <span id="brightness-value">200</span></label>
+                                <input id="brightness-slider" type="range" min="0" max="255" step="5" value="200" />
+                            </div>
+                            <div class="slider-group">
+                                <label>Strength <span id="strength-value">50</span></label>
+                                <input id="strength-slider" type="range" min="0" max="150" step="1" value="50" />
+                            </div>
+                            <button type="submit" class="primary-btn">Apply Glow</button>
+                        </form>
+                    </div>
+                    <div class="card">
+                        <form id="before-after-form" class="tool-form">
+                            <div class="form-header">
+                                <h3>Before/After Swipe</h3>
+                                <p class="muted">Blend two visuals into a motion clip with optional captions.</p>
+                            </div>
+                            <label for="before-image">Before image</label>
+                            <input id="before-image" type="file" accept="image/*" required />
+                            <label for="after-image">After image</label>
+                            <input id="after-image" type="file" accept="image/*" required />
+                            <div class="form-row">
+                                <label for="before-after-duration">Duration (seconds)</label>
+                                <input id="before-after-duration" type="number" min="1" max="20" step="0.5" value="6" />
+                                <label for="before-after-fps">FPS</label>
+                                <input id="before-after-fps" type="number" min="1" max="60" step="1" value="30" />
+                            </div>
+                            <div class="form-row">
+                                <label for="before-after-cycles">Cycles</label>
+                                <input id="before-after-cycles" type="number" min="1" max="10" step="1" value="2" />
+                                <label for="before-after-line">Line thickness</label>
+                                <input id="before-after-line" type="number" min="1" max="20" step="1" value="6" />
+                            </div>
+                            <label class="checkbox">
+                                <input id="before-after-text-toggle" type="checkbox" />
+                                <span>Add overlay text</span>
+                            </label>
+                            <textarea id="before-after-text" rows="2" placeholder="Save 35% this quarter" style="display: none;"></textarea>
+                            <button type="submit" class="primary-btn">Generate Clip</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <aside class="panel__column panel__column--results">
+                <div class="results-header">
+                    <h3>Latest output</h3>
+                    <p class="muted">Previews and download links land here.</p>
+                </div>
+                <div id="image-results" class="result-panel" aria-live="polite"></div>
+            </aside>
+        </div>
+    </div>
+</section>
